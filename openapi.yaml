@@ -1,0 +1,156 @@
+openapi: 3.0.3
+info:
+  title: SalonBook API
+  version: 0.2.0
+  description: Phase 02 API foundation. Protected operations await verified authentication in Phase 04.
+servers:
+  - url: http://localhost:5000/api
+paths:
+  /health:
+    get:
+      summary: API health
+      responses:
+        '200': { description: Healthy }
+  /services:
+    get:
+      summary: List active services
+      parameters:
+        - { in: query, name: q, schema: { type: string } }
+        - { in: query, name: category, schema: { type: string } }
+        - { in: query, name: minPrice, schema: { type: number, minimum: 0 } }
+        - { in: query, name: maxPrice, schema: { type: number, minimum: 0 } }
+        - { in: query, name: sort, schema: { type: string, enum: [price_asc, price_desc, newest] } }
+        - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
+        - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 100, default: 12 } }
+      responses:
+        '200': { description: Service page }
+        '400': { description: Invalid query }
+    post:
+      summary: Create service (admin; Phase 04 auth pending)
+      responses:
+        '201': { description: Created }
+        '501': { description: Authentication integration pending }
+  /services/categories:
+    get:
+      summary: List service categories
+      responses:
+        '200': { description: Categories }
+  /services/{id}:
+    get:
+      summary: Get active service
+      parameters: [{ in: path, name: id, required: true, schema: { type: string, pattern: '^[a-fA-F0-9]{24}$' } }]
+      responses:
+        '200': { description: Service }
+        '404': { description: Not found }
+    patch:
+      summary: Update service (admin; Phase 04 auth pending)
+      parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: Updated }
+        '501': { description: Authentication integration pending }
+    delete:
+      summary: Delete service if no appointment history (admin; Phase 04 auth pending)
+      parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+      responses:
+        '204': { description: Deleted }
+        '409': { description: Historical appointments exist }
+  /appointments:
+    post:
+      summary: Request appointment (customer; Phase 04 auth pending)
+      responses:
+        '201': { description: Pending unpaid appointment }
+        '409': { description: Slot conflict }
+        '501': { description: Authentication integration pending }
+  /appointments/my:
+    get:
+      summary: List current customer's appointments
+      responses:
+        '200': { description: Appointments }
+        '501': { description: Authentication integration pending }
+  /appointments/{id}:
+    get:
+      summary: Get appointment as owner/admin
+      parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: Appointment }
+        '404': { description: Not found }
+  /appointments/{id}/cancel:
+    patch:
+      summary: Customer cancels own pending appointment
+      parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: Cancelled }
+        '422': { description: Invalid state transition }
+  /admin/appointments:
+    get:
+      summary: Admin appointment listing
+      responses:
+        '200': { description: Appointment page }
+  /admin/appointments/{id}/confirm:
+    patch:
+      summary: Admin confirms pending appointment
+      parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: Confirmed }
+        '422': { description: Invalid state transition }
+  /admin/appointments/{id}/cancel:
+    patch:
+      summary: Admin cancels pending or confirmed appointment
+      parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: Cancelled }
+  /users/profile:
+    patch:
+      summary: Update own permitted profile fields
+      responses:
+        '200': { description: Profile }
+        '400': { description: Mass assignment rejected }
+  /admin/users:
+    get:
+      summary: Admin user list
+      responses:
+        '200': { description: User page }
+  /admin/users/{id}:
+    get:
+      summary: Admin user detail
+      parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: User }
+  /admin/users/{id}/block:
+    patch:
+      summary: Block customer
+      parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: Blocked }
+  /admin/users/{id}/unblock:
+    patch:
+      summary: Unblock customer
+      parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: Unblocked }
+  /transactions/my:
+    get:
+      summary: Current customer's transactions
+      responses:
+        '200': { description: Transaction page }
+  /transactions/{id}:
+    get:
+      summary: Get own transaction or admin transaction
+      parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: Transaction }
+  /admin/transactions:
+    get:
+      summary: Admin transaction list
+      responses:
+        '200': { description: Transaction page }
+  /customer/dashboard/stats:
+    get:
+      summary: Customer dashboard counts
+      responses:
+        '200': { description: Counts }
+  /admin/dashboard/stats:
+    get:
+      summary: Admin dashboard counts
+      responses:
+        '200': { description: Counts }

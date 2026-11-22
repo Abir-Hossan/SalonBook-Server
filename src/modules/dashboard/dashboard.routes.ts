@@ -1,0 +1,8 @@
+import {Router} from 'express';import type {AppointmentRepository,ServiceRepository,TransactionRepository,UserRepository} from '../../interfaces/repositories';import {authenticate,authorize,type PrincipalResolver} from '../../middleware/auth';import {asyncHandler} from '../../utils/async-handler';import {success} from '../../utils/http';
+export const dashboardRoutes=(deps:{appointments:AppointmentRepository;services:ServiceRepository;users:UserRepository;transactions:TransactionRepository},resolver:PrincipalResolver)=>{const customer=Router();customer.get('/stats',authenticate(resolver),authorize('customer'),asyncHandler(async(req,res)=>{const customerId=req.principal!.id;
+const [total,pending,confirmed,cancelled]=await Promise.all([
+  deps.appointments.list({page:1,limit:1,customerId}),
+  deps.appointments.list({page:1,limit:1,customerId,status:'pending'}),
+  deps.appointments.list({page:1,limit:1,customerId,status:'confirmed'}),
+  deps.appointments.list({page:1,limit:1,customerId,status:'cancelled'})
+]);success(res,'Customer dashboard statistics retrieved.',{totalAppointments:total.meta.total,pending:pending.meta.total,confirmed:confirmed.meta.total,cancelled:cancelled.meta.total});}));const admin=Router();admin.get('/stats',authenticate(resolver),authorize('admin'),asyncHandler(async(_req,res)=>{const [a,s,u,t]=await Promise.all([deps.appointments.list({page:1,limit:1}),deps.services.list({page:1,limit:1,includeInactive:true}),deps.users.list({page:1,limit:1}),deps.transactions.list({page:1,limit:1})]);success(res,'Admin dashboard statistics retrieved.',{appointments:a.meta.total,services:s.meta.total,users:u.meta.total,transactions:t.meta.total});}));return{customer,admin};};

@@ -1,0 +1,15 @@
+import { getRouteParam } from '../../utils/route-param';
+import { Router } from 'express';
+import type { Request } from 'express';
+import type { ServiceService } from './service.service';
+import { createServiceBody, listServicesQuery, serviceDetailQuery, serviceIdParams, updateServiceBody } from './schemas';
+import { validate } from '../../middleware/validate'; import { authenticate, authorize, authenticateWhen, authorizeWhen, type PrincipalResolver } from '../../middleware/auth';
+import { asyncHandler } from '../../utils/async-handler'; import { success } from '../../utils/http';
+const requestsInactive = (req: Request): boolean => (req.query as unknown as { includeInactive?: boolean }).includeInactive === true;
+export const serviceRoutes=(service:ServiceService,resolver:PrincipalResolver)=>{const r=Router();
+ r.get('/',validate(listServicesQuery,'query'),authenticateWhen(requestsInactive,resolver),authorizeWhen(requestsInactive,'admin'),asyncHandler(async(req,res)=>{const result=await service.list(req.query as never,requestsInactive(req));success(res,'Services retrieved successfully.',result.items,200,result.meta);}));
+ r.get('/categories',asyncHandler(async(_req,res)=>{success(res,'Service categories retrieved successfully.',await service.listCategories());}));
+ r.get('/:id',validate(serviceIdParams,'params'),validate(serviceDetailQuery,'query'),authenticateWhen(requestsInactive,resolver),authorizeWhen(requestsInactive,'admin'),asyncHandler(async(req,res)=>success(res,'Service retrieved successfully.',await service.get(getRouteParam(req, 'id'),requestsInactive(req)))));
+ r.post('/',authenticate(resolver),authorize('admin'),validate(createServiceBody,'body'),asyncHandler(async(req,res)=>success(res,'Service created successfully.',await service.create(req.body),201)));
+ r.patch('/:id',authenticate(resolver),authorize('admin'),validate(serviceIdParams,'params'),validate(updateServiceBody,'body'),asyncHandler(async(req,res)=>success(res,'Service updated successfully.',await service.update(getRouteParam(req, 'id'),req.body))));
+ r.delete('/:id',authenticate(resolver),authorize('admin'),validate(serviceIdParams,'params'),asyncHandler(async(req,res)=>{await service.remove(getRouteParam(req, 'id'));res.status(204).send();})); return r;};

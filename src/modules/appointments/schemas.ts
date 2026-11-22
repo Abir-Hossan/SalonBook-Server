@@ -1,0 +1,4 @@
+import { z } from 'zod'; import { isValidId } from '../../utils/ids';
+export const appointmentIdParams=z.object({id:z.string().refine(isValidId,'Invalid appointment ID.')});
+export const createAppointmentBody=z.object({serviceId:z.string().refine(isValidId,'Invalid service ID.'),appointmentDate:z.string().regex(/^\d{4}-\d{2}-\d{2}$/,'Use YYYY-MM-DD.'),timeSlot:z.string().regex(/^(0?[1-9]|1[0-2]):[0-5]\d\s(AM|PM)$/i,'Use a time such as 10:30 AM.'),message:z.string().trim().max(500).optional()}).strict();
+export const appointmentListQuery=z.object({status:z.enum(['pending','confirmed','cancelled']).optional(),paymentStatus:z.enum(['unpaid','paid']).optional(),dateFrom:z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),dateTo:z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),page:z.coerce.number().int().min(1).default(1),limit:z.coerce.number().int().min(1).max(100).default(12)});

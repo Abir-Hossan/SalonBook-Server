@@ -1,0 +1,19 @@
+import type { AppointmentRepository, ServiceRepository } from '../../interfaces/repositories'; import type { Principal } from '../../types/domain'; import { AppError } from '../../utils/errors';
+const isRealDate=(value:string)=>{const d=new Date(`${value}T00:00:00.000Z`);return !Number.isNaN(d.valueOf())&&d.toISOString().slice(0,10)===value;};
+export class AppointmentService {
+ constructor(private readonly appointments:AppointmentRepository,private readonly services:ServiceRepository){}
+ async create(principal:Principal,input:{serviceId:string;appointmentDate:string;timeSlot:string;message?:string}){if(principal.role!=='customer')throw new AppError(403,'Only customers can request appointments.','CUSTOMER_REQUIRED');if(!/^(0?[1-9]|1[0-2]):[0-5]\d\s(AM|PM)$/i.test(input.timeSlot))throw new AppError(400,'Time slot format is invalid.','INVALID_TIME_SLOT');if(!isRealDate(input.appointmentDate)||input.appointmentDate<=new Date().toISOString().slice(0,10))throw new AppError(422,'Appointment date must be a valid future date.','INVALID_APPOINTMENT_DATE');const service=await this.services.findById(input.serviceId);if(!service||service.status!=='active')throw new AppError(404,'Active service was not found.','SERVICE_NOT_AVAILABLE');const normalizedSlot=input.timeSlot.toUpperCase().replace(/\s+/g,' ').padStart(8,'0');if(await this.appointments.findActiveSlot(input.appointmentDate,normalizedSlot))throw new AppError(409,'This time slot is already reserved.','APPOINTMENT_SLOT_CONFLICT');return this.appointments.create({serviceId:service.id,customerId:principal.id,appointmentDate:input.appointmentDate,timeSlot:normalizedSlot,message:input.message,servicePrice:service.price,paymentStatus:'unpaid',status:'pending'});}
+ listMine(principal:Principal,query:Parameters<AppointmentRepository['list']>[0]){return this.appointments.list({...query,customerId:principal.id});}
+ listAll(query:Parameters<AppointmentRepository['list']>[0]){return this.appointments.list(query);}
+ async get(principal:Principal,id:string){const item=await this.appointments.findById(id);if(!item||(item.customerId!==principal.id&&principal.role!=='admin'))throw new AppError(404,'Appointment was not found.','APPOINTMENT_NOT_FOUND');return item;}
+ async cancelByCustomer(principal:Principal,id:string){const item=await this.get(principal,id);if(item.customerId!==principal.id)throw new AppError(404,'Appointment was not found.','APPOINTMENT_NOT_FOUND');if(item.status!=='pending')throw new AppError(422,'Customers may cancel pending appointments only.','INVALID_APPOINTMENT_TRANSITION');return this.changeStatus(id,['pending'],'cancelled');}
+ async confirm(id:string){const item=await this.require(id);if(item.status!=='pending')throw new AppError(422,'Only pending appointments can be confirmed.','INVALID_APPOINTMENT_TRANSITION');return this.changeStatus(id,['pending'],'confirmed');}
+ async cancelByAdmin(id:string){const item=await this.require(id);if(!['pending','confirmed'].includes(item.status))throw new AppError(422,'This appointment cannot be cancelled.','INVALID_APPOINTMENT_TRANSITION');return this.changeStatus(id,['pending','confirmed'],'cancelled');}
+ async assertCheckoutEligible(principal:Principal,id:string){const item=await this.get(principal,id);if(item.status!=='confirmed'||item.paymentStatus!=='unpaid')throw new AppError(422,'Only confirmed, unpaid appointments are eligible for payment.','PAYMENT_NOT_ELIGIBLE');return item;}
+ private async changeStatus(id:string,from:('pending'|'confirmed')[],to:'cancelled'|'confirmed'){ 
+  const updated=await this.appointments.transition(id,from,to);
+  if(!updated)throw new AppError(422,'The appointment status changed. Refresh and try again.','INVALID_APPOINTMENT_TRANSITION');
+  return updated;
+ }
+ private async require(id:string){const item=await this.appointments.findById(id);if(!item)throw new AppError(404,'Appointment was not found.','APPOINTMENT_NOT_FOUND');return item;}
+}

@@ -11,6 +11,7 @@ export interface Service {
 export interface Appointment {
   id: string; serviceId: string; customerId: string; appointmentDate: string;
   timeSlot: string; message?: string; servicePrice: number;
+  serviceDuration?: number; serviceName?: string; serviceImage?: string;
   paymentStatus: PaymentStatus; status: AppointmentStatus; createdAt: string;
 }
 export interface User {

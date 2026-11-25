@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { AppError } from '../utils/errors';
+import { reservationKeys, slotMinutes } from '../modules/appointments/schedule';
 import type { Appointment, PageMeta, PageResult, Service, Transaction, User } from '../types/domain';
 import type { AppointmentFilters, AppointmentRepository, ServiceFilters, ServiceRepository, TransactionFilters, TransactionRepository, UserFilters, UserRepository } from '../interfaces/repositories';
 const page = <T>(items: T[], pageNumber: number, limit: number): PageResult<T> => {
@@ -31,12 +32,14 @@ export class MemoryServiceRepository implements ServiceRepository {
 export class MemoryAppointmentRepository implements AppointmentRepository {
   private readonly records = new Map<string, Appointment>();
   constructor(seed: Appointment[] = []) { seed.forEach((item) => this.records.set(item.id,{...item})); }
-  async list(f: AppointmentFilters) { const rows=[...this.records.values()].filter(x=>(!f.customerId||x.customerId===f.customerId)&&(!f.status||x.status===f.status)&&(!f.paymentStatus||x.paymentStatus===f.paymentStatus)&&(!f.dateFrom||x.appointmentDate>=f.dateFrom)&&(!f.dateTo||x.appointmentDate<=f.dateTo)); rows.sort((a,b)=>b.createdAt.localeCompare(a.createdAt)); return page(rows,f.page,f.limit); }
+  async list(f: AppointmentFilters) { const rows=[...this.records.values()].filter(x=>(!f.customerId||x.customerId===f.customerId)&&(!f.upcoming||x.status!=='cancelled')&&(!f.status||x.status===f.status)&&(!f.q||[x.id,x.serviceName,x.appointmentDate,x.timeSlot,x.status].some(value=>value?.toLowerCase().includes(f.q!.toLowerCase())))&&(!f.paymentStatus||x.paymentStatus===f.paymentStatus)&&(!f.dateFrom||x.appointmentDate>=f.dateFrom)&&(!f.dateTo||x.appointmentDate<=f.dateTo)); rows.sort((a,b)=>f.upcoming ? a.appointmentDate.localeCompare(b.appointmentDate) || slotMinutes(a.timeSlot) - slotMinutes(b.timeSlot) : b.createdAt.localeCompare(a.createdAt)); return page(rows,f.page,f.limit); }
   async findById(id: string) { return this.records.get(id)??null; }
   async create(input: Omit<Appointment,'id'|'createdAt'>) {
+    const keys = new Set(reservationKeys(input.appointmentDate, input.timeSlot, input.serviceDuration));
     for (const record of this.records.values()) {
       if (input.status !== 'cancelled' && record.status !== 'cancelled' &&
-          record.appointmentDate === input.appointmentDate && record.timeSlot === input.timeSlot) {
+          record.appointmentDate === input.appointmentDate && (record.timeSlot === input.timeSlot ||
+          reservationKeys(record.appointmentDate, record.timeSlot, record.serviceDuration).some((key) => keys.has(key)))) {
         throw new AppError(409, 'This time slot is already reserved.', 'APPOINTMENT_SLOT_CONFLICT');
       }
     }
@@ -53,6 +56,7 @@ export class MemoryAppointmentRepository implements AppointmentRepository {
   }
   async update(id:string,patch:Partial<Appointment>) { const old=this.records.get(id); if(!old)return null; const next={...old,...patch}; this.records.set(id,next); return next; }
   async findActiveSlot(date:string,timeSlot:string) { return [...this.records.values()].find(x=>x.appointmentDate===date&&x.timeSlot===timeSlot&&x.status!=='cancelled')??null; }
+  async listActiveOnDate(date: string) { return [...this.records.values()].filter((row) => row.appointmentDate === date && row.status !== 'cancelled'); }
   async hasServiceAppointments(serviceId:string) { return [...this.records.values()].some(x=>x.serviceId===serviceId); }
 }
 export class MemoryUserRepository implements UserRepository {
@@ -63,7 +67,7 @@ export class MemoryUserRepository implements UserRepository {
 }
 export class MemoryTransactionRepository implements TransactionRepository {
   private readonly records=new Map<string,Transaction>();constructor(seed:Transaction[]=[]){seed.forEach(x=>this.records.set(x.id,{...x}));}
-  async list(f:TransactionFilters){const rows=[...this.records.values()].filter(x=>(!f.status||x.status===f.status)&&(!f.customerId||x.customerId===f.customerId)&&(!f.appointmentId||x.appointmentId===f.appointmentId));rows.sort((a,b)=>b.createdAt.localeCompare(a.createdAt));return page(rows,f.page,f.limit);}
+  async list(f:TransactionFilters){const rows=[...this.records.values()].filter(x=>(!f.status||x.status===f.status)&&(!f.customerId||x.customerId===f.customerId)&&(!f.appointmentId||x.appointmentId===f.appointmentId)&&(!f.q||[x.id,x.appointmentId,x.currency,x.status,x.stripeSessionId].some(value=>value?.toLowerCase().includes(f.q!.toLowerCase()))));rows.sort((a,b)=>b.createdAt.localeCompare(a.createdAt));return page(rows,f.page,f.limit);}
   async findById(id:string){return this.records.get(id)??null;}
 }
 function cryptoId():string { return randomBytes(12).toString('hex'); }

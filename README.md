@@ -11,10 +11,13 @@ SalonBook Express and TypeScript API with Mongoose persistence and Better Auth. 
 
 ```bash
 npm ci
+# Configure the environment described below before starting.
 npm run dev
 ```
 
 Create a local .env from .env.example only if .env does not already exist. Configure a MongoDB replica set and supply BETTER_AUTH_SECRET and BETTER_AUTH_URL before starting the server. Health endpoint: `GET http://localhost:5000/api/health`.
+
+For current requirements, deployment steps and verification, see [PROJECT_STATUS.md](PROJECT_STATUS.md).
 
 ## Scripts
 
@@ -38,4 +41,4 @@ In the in-memory repository, concurrent requests for the same appointment slot p
 
 ## Service image uploads
 
-`POST /api/admin/images/service` accepts a PNG, JPEG, or WebP file as the raw request body, up to 5 MiB. Supply an authenticated admin session and configure `IMGBB_API_KEY` on the server. Use the returned image URL when saving the service. The dashboard form still needs to be connected to this endpoint.
+`POST /api/admin/images/service` accepts a PNG, JPEG, or WebP file as the raw request body, up to 5 MiB. Supply an authenticated admin session and configure `IMGBB_API_KEY` on the server. Use the returned image URL when saving the service. The admin form sends the selected image and saves the returned URL with the service.

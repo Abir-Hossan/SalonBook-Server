@@ -18,7 +18,7 @@ async function start(): Promise<void> {
   await startupStep('mongodb.indexes.CustomerSessions', () => SessionModel.createIndexes());
 
   const { createMongoRepositories, seedMongoCatalog } = await startupStep('repositories.load', () => import('./database/repositories/mongo.repositories.js'));
-  if (env.NODE_ENV === 'development' && env.SEED_DEMO_CATALOG === 'true') {
+  if (env.SEED_DEMO_CATALOG === 'true') {
     const { demoCatalog } = await startupStep('catalogue.load', () => import('./repositories/demo-catalog.js'));
     await startupStep('catalogue.seed', () => seedMongoCatalog(demoCatalog));
     logger.info({ count: demoCatalog.length }, 'Demo service catalog ensured in MongoDB');

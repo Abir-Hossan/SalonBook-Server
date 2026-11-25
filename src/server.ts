@@ -19,7 +19,7 @@ async function start(): Promise<void> {
   }
   const app = createApp({ repositories: createMongoRepositories(), enableMongoAuth: true });
   const server = createServer(app);
-  server.listen(env.PORT, () => logger.info({ port: env.PORT, environment: env.NODE_ENV }, 'SalonBook API listening'));
+  server.listen(env.PORT, '0.0.0.0', () => logger.info({ port: env.PORT, environment: env.NODE_ENV }, 'SalonBook API listening'));
 
   const shutdown = (signal: string) => {
     logger.info({ signal }, 'Graceful shutdown requested');
@@ -39,7 +39,11 @@ async function start(): Promise<void> {
 }
 
 start().catch(async (error: unknown) => {
-  logger.fatal({ failure: error instanceof Error ? error.name : 'UnknownError' }, 'SalonBook API failed to start. Check environment, MongoDB connectivity and index permissions.');
+  const failure = error instanceof Error ? error.name : 'UnknownError';
+  const cause = error instanceof Error ? error.cause : undefined;
+  const code = cause && typeof cause === 'object' && 'code' in cause && typeof cause.code === 'string'
+    && /^[A-Z0-9_]+$/.test(cause.code) ? cause.code : undefined;
+  logger.fatal({ failure, code }, 'SalonBook API failed to start. Check environment, MongoDB connectivity and index permissions.');
   try { await disconnectDatabase(); } catch { logger.error('MongoDB cleanup failed'); }
   process.exitCode = 1;
 });

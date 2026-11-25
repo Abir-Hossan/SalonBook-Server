@@ -19,7 +19,11 @@ const envSchema = z.object({
   CLIENT_URL: z.string().url().default('http://localhost:3000'),
   ALLOWED_ORIGINS: z.string().default('http://localhost:3000'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
-  REQUEST_BODY_LIMIT: z.string().default('100kb')
+  REQUEST_BODY_LIMIT: z.string().default('100kb'),
+  SALON_TIME_ZONE: z.string().default('UTC').refine((zone) => {
+    try { new Intl.DateTimeFormat('en', { timeZone: zone }); return true; } catch { return false; }
+  }, 'Use a valid IANA time zone'),
+  TRUST_PROXY: z.coerce.number().int().min(0).max(10).default(0)
 });
 
 const parsed = envSchema.safeParse(process.env);

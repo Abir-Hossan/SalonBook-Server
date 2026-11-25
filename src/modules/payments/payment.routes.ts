@@ -3,6 +3,7 @@ import express, { Router } from 'express';
 import mongoose from 'mongoose';
 import { z } from 'zod';
 import { env } from '../../config/env';
+import { logger } from '../../config/logger';
 import { AppointmentModel } from '../../database/models/appointment.model';
 import { TransactionModel } from '../../database/models/transaction.model';
 import { authenticate, authorize } from '../../middleware/auth';
@@ -20,11 +21,22 @@ const sessionSchema = z.object({
   amount_total: z.number().int(),
   currency: z.string(),
   metadata: z.object({ appointmentId: idSchema, attempt: z.string().uuid() }),
+  livemode: z.literal(false),
 });
 
+function isConfigured() {
+  return /^(?:sk|rk)_test_/.test(env.STRIPE_SECRET_KEY ?? '') && /^whsec_/.test(env.STRIPE_WEBHOOK_SECRET ?? '');
+}
+
 function configured() {
-  if (!env.STRIPE_SECRET_KEY || !env.STRIPE_WEBHOOK_SECRET) {
+  if (!isConfigured()) {
     throw new AppError(503, 'Online payments are currently unavailable.', 'STRIPE_UNAVAILABLE');
+  }
+}
+
+class StripeRequestError extends AppError {
+  constructor(readonly providerStatus: number) {
+    super(502, 'Checkout could not be reached. Try again.', 'STRIPE_REQUEST_FAILED');
   }
 }
 
@@ -34,7 +46,7 @@ async function stripe(path: string, init: RequestInit = {}) {
     ...init, signal: AbortSignal.timeout(12_000),
     headers: { ...init.headers, Authorization: 'Bearer ' + env.STRIPE_SECRET_KEY },
   });
-  if (!response.ok) throw new AppError(502, 'Checkout could not be reached. Try again.', 'STRIPE_REQUEST_FAILED');
+  if (!response.ok) throw new StripeRequestError(response.status);
   return sessionSchema.parse(await response.json());
 }
 
@@ -56,7 +68,7 @@ async function recordPayment(checkout: z.infer<typeof sessionSchema>) {
   }
   if (checkout.status !== 'complete' || checkout.payment_status !== 'paid') return;
   await mongoose.connection.transaction(async (session) => {
-    const booking = await AppointmentModel.findOne({ _id: appointmentId, checkoutAttempt: attempt }).session(session);
+    const booking = await AppointmentModel.findOne({ _id: appointmentId, checkoutAttempt: attempt, $or: [{ checkoutSessionId: checkout.id }, { checkoutSessionId: { $exists: false } }] }).session(session);
     if (!booking || booking.paymentStatus === 'paid') return;
     if (booking.status !== 'confirmed' || checkout.currency !== 'usd' || checkout.amount_total !== Math.round(booking.servicePrice * 100)) {
       throw new AppError(409, 'Payment does not match the appointment.', 'PAYMENT_MISMATCH');
@@ -78,7 +90,11 @@ export const stripeWebhook = [
     const event = z.object({ type: z.string(), data: z.object({ object: z.unknown() }) }).parse(JSON.parse(req.body.toString('utf8')));
     if (['checkout.session.completed', 'checkout.session.async_payment_succeeded', 'checkout.session.expired'].includes(event.type)) {
       const checkout = sessionSchema.safeParse(event.data.object);
-      if (checkout.success) await recordPayment(checkout.data);
+      if (!checkout.success) {
+        logger.warn({ eventType: event.type }, 'Rejected a Stripe test event with an invalid checkout payload');
+        throw new AppError(400, 'Invalid checkout notification data.', 'INVALID_STRIPE_EVENT');
+      }
+      await recordPayment(checkout.data);
     }
     res.status(204).end();
   }),
@@ -87,7 +103,7 @@ export const stripeWebhook = [
 export function paymentRoutes() {
   const router = Router();
   const customer = [authenticate(mongoPrincipalResolver), authorize('customer')];
-  router.get('/availability', ...customer, (_req, res) => success(res, 'Payment availability.', { stripe: Boolean(env.STRIPE_SECRET_KEY && env.STRIPE_WEBHOOK_SECRET) }));
+  router.get('/availability', ...customer, (_req, res) => success(res, 'Payment availability.', { stripe: isConfigured() }));
   router.post('/checkout', ...customer, asyncHandler(async (req, res) => {
     configured();
     const { appointmentId } = z.object({ appointmentId: idSchema }).strict().parse(req.body);
@@ -114,11 +130,20 @@ export function paymentRoutes() {
         'line_items[0][price_data][unit_amount]': String(Math.round(booking.servicePrice * 100)),
         'line_items[0][price_data][product_data][name]': 'SalonBook appointment',
       });
-      checkout = await stripe('', { method: 'POST', headers: { 'Idempotency-Key': booking.checkoutAttempt }, body: params });
+      try {
+        checkout = await stripe('', { method: 'POST', headers: { 'Idempotency-Key': booking.checkoutAttempt }, body: params });
+      } catch (error) {
+        if (error instanceof StripeRequestError && [400, 401, 403].includes(error.providerStatus)) {
+          await AppointmentModel.updateOne({
+            _id: booking._id, checkoutAttempt: booking.checkoutAttempt, checkoutSessionId: { $exists: false }, paymentStatus: 'unpaid',
+          }, { $unset: { checkoutAttempt: '', checkoutStartedAt: '' } });
+        }
+        throw error;
+      }
       await AppointmentModel.updateOne({ _id: booking._id, checkoutAttempt: booking.checkoutAttempt }, { $set: { checkoutSessionId: checkout.id } });
     }
     if (checkout.status !== 'open' || !checkout.url) {
-      await recordPayment(checkout);
+      if (checkout.status === 'expired') await recordPayment(checkout);
       throw new AppError(409, 'This checkout has closed. Refresh your appointments for the latest status.', 'CHECKOUT_CLOSED');
     }
     if (new URL(checkout.url).hostname !== 'checkout.stripe.com' || !checkout.url.startsWith('https://')) {

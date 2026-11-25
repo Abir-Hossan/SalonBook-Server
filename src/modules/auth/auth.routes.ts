@@ -47,6 +47,12 @@ async function issueSession(req: Request, res: Response, userId: Types.ObjectId,
 
 export const mongoPrincipalResolver: PrincipalResolver = async (req) => {
   const auth = getBetterAuth();
+  const bearer = /^Bearer ([A-Za-z0-9_.-]+)$/i.exec(req.get('authorization') ?? '')?.[1];
+  if (auth && bearer) {
+    const id = await auth.verifyAccessToken(bearer);
+    const user = id ? await UserModel.findById(id).lean() : null;
+    return user ? { id: String(user._id), role: user.role, isBlocked: user.isBlocked, email: user.email } : null;
+  }
   if (auth) {
     const session = await auth.api.getSession({ headers: auth.headers(req.headers), query: { disableRefresh: true } });
     if (session) {

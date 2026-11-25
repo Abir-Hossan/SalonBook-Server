@@ -1,4 +1,4 @@
-import { generateKeyPairSync, randomBytes, scryptSync, sign } from 'node:crypto';
+import { createHmac, generateKeyPairSync, randomBytes, scryptSync, sign } from 'node:crypto';
 import mongoose from 'mongoose';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -16,6 +16,8 @@ import { createQaDatabase, qaTarget } from '../fixtures/qa-database';
 vi.hoisted(() => {
   process.env.GOOGLE_CLIENT_ID = 'salonbook-oauth-test-client';
   process.env.GOOGLE_CLIENT_SECRET = 'salonbook-oauth-test-secret';
+  process.env.STRIPE_SECRET_KEY = 'sk_test_mock';
+  process.env.STRIPE_WEBHOOK_SECRET = 'whsec_mock';
 });
 
 const localUri = process.env.SALONBOOK_AUTH_TEST_URI;
@@ -98,6 +100,43 @@ describe.skipIf(!localUri && !atlasUri)('Better Auth with disposable MongoDB (' 
       { userId: new mongoose.Types.ObjectId(created.body.data.id) }, { $set: { expiresAt: new Date(0) } },
     );
     await agent.get('/api/auth/me').expect(401);
+  });
+
+  it('issues a signed access token bound to its session', async () => {
+    const agent = request.agent(app());
+    const user = await signUp(agent, 'jwt').expect(201);
+    const issued = await agent.get('/api/better-auth/token').expect(200);
+    const token = issued.body.token;
+    expect(typeof token).toBe('string');
+    const bearer = () => request(app()).get('/api/auth/me').set('Authorization', 'Bearer ' + token);
+    expect((await bearer().expect(200)).body.data.id).toBe(user.body.data.id);
+    await request(app()).get('/api/auth/me').set('Authorization', 'Bearer broken.jwt.value').expect(401);
+    await agent.post('/api/auth/sign-out').set('Origin', origin).expect(204);
+    await bearer().expect(401);
+  });
+
+  it('validates Stripe test webhooks and records a paid appointment only once', async () => {
+    const agent = request.agent(app());
+    const user = await signUp(agent, 'stripe').expect(201);
+    const attempt = '610d182e-aeee-4f23-a3ef-6202b3dc79ca';
+    const booking = await AppointmentModel.create({
+      serviceId: ids.service, customerId: user.body.data.id, appointmentDate: '2099-08-08',
+      timeSlot: '04:00 PM', servicePrice: 165, status: 'confirmed', paymentStatus: 'unpaid', checkoutAttempt: attempt,
+    });
+    const body = JSON.stringify({ type: 'checkout.session.completed', data: { object: {
+      id: 'cs_test_salonbook', status: 'complete', payment_status: 'paid', amount_total: 16500,
+      currency: 'usd', livemode: false, metadata: { appointmentId: String(booking._id), attempt },
+    } } });
+    const timestamp = Math.floor(Date.now() / 1000);
+    const signed = createHmac('sha256', env.STRIPE_WEBHOOK_SECRET!).update(timestamp + '.' + body).digest('hex');
+    const webhook = (signature: string) => request(app()).post('/api/payments/webhook')
+      .set('Content-Type', 'application/json').set('Stripe-Signature', signature).send(body);
+    await webhook('bad').expect(400);
+    expect((await AppointmentModel.findById(booking._id))?.paymentStatus).toBe('unpaid');
+    await webhook(`t=${timestamp},v1=${signed}`).expect(204);
+    await webhook(`t=${timestamp},v1=${signed}`).expect(204);
+    expect((await AppointmentModel.findById(booking._id))?.paymentStatus).toBe('paid');
+    expect(await TransactionModel.countDocuments({ appointmentId: booking._id })).toBe(1);
   });
 
   it('rejects a blocked account at login and after an administrator blocks its live session', async () => {

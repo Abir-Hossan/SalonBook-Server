@@ -4,14 +4,14 @@ Updated 25 November 2026.
 
 ## Release status
 
-**Implementation and automated staging checks are complete. Provider and production acceptance remain open.** The current Vercel application renders its public pages, but the catalogue and categories are unavailable. Its `/salon-api/health` rewrite returned Vercel `404 DNS_HOSTNAME_RESOLVED_PRIVATE` in a browser. A public, healthy Express endpoint and the corresponding Vercel environment setting are required.
+**Phase 4 public smoke and isolated acceptance passed. Vercel Preview and live provider acceptance remain open.** The public Vercel Client reached the Render Server after it resumed from idle.
 
 | Component | Location |
 | --- | --- |
 | Client | [SalonBook-Client](https://github.com/Abir-Hossan/SalonBook-Client) · [completion branch](https://github.com/Abir-Hossan/SalonBook-Client/tree/completion/assignment-readiness) |
 | Server | [SalonBook-Server](https://github.com/Abir-Hossan/SalonBook-Server) · [completion branch](https://github.com/Abir-Hossan/SalonBook-Server/tree/completion/assignment-readiness) |
 | Existing client deployment | [salonbook-client-ivory.vercel.app](https://salonbook-client-ivory.vercel.app/) |
-| Server deployment | Public URL pending hosting and Atlas setup |
+| Server deployment | [salonbook-server-p0f1.onrender.com](https://salonbook-server-p0f1.onrender.com/api/ready) |
 
 Next.js serves the public site and dashboards, using same-origin rewrites to the Express API. TypeScript domain modules enforce booking and account rules. Mongoose persists services, users, appointments and transactions. Better Auth manages browser cookies and signs five-minute API JWTs. A bearer JWT still requires a live, matching Better Auth session and an authorized, unblocked database account. Stripe Checkout remains in test mode.
 
@@ -19,27 +19,29 @@ Next.js serves the public site and dashboards, using same-origin rewrites to the
 
 | Requirement | Implementation and acceptance |
 | --- | --- |
-| Six active services and featured homepage | Home requests six active records. The explicit catalog bootstrap inserts the six supplied services without overwriting existing records. Verify six active records on the public homepage after staging setup. |
-| Service listing, details, categories, search, sorting and filtering | Integrated with Express. Public catalogue uses server pagination, category filters, search and price sorting. The existing deployment cannot reach the API. |
+| Six active services and featured homepage | Home requests six active records. The explicit catalog bootstrap inserts the six supplied services without overwriting existing records. Phase 4 observed eight active public catalogue services and verified six featured cards in isolated browser CI. |
+| Service listing, details, categories, search, sorting and filtering | Integrated with Express. Public catalogue uses server pagination, category filters, search and price sorting. The public catalogue and service details reached the deployed API during Phase 4. |
 | Customer and admin auth | Existing signup, signin, signout, blocking, roles, redirects and booking resume are preserved. Added remember-me renewal and session-bound JWT support. The CI suite verifies cookie flags under HTTPS configuration and session renewal. Live Google OAuth and the deployed Vercel cookie path remain acceptance items. Password recovery and email verification require mail delivery configuration. |
 | Appointment booking, conflicts and ownership | Availability comes from the server. The existing six start times, single shared salon capacity and future-date rule are retained. New records snapshot price, duration, name and image. A MongoDB unique multikey index protects concurrent overlap. Existing appointments are checked using their stored duration or the current service duration. Cancellation releases the reservation. Validate existing future rows and indexes on a disposable Atlas database before rollout. |
 | Customer portal | Displays server-paginated appointments, status, details, cancellation, profile and payment history. Upcoming appointments exclude cancelled and earlier dates. |
 | Admin portal | API-backed statistics, service CRUD and activation, appointment actions, customer blocking/unblocking, profiles, and paginated transaction history. Role enforcement stays on the server. |
 | ImgBB | Service and profile upload routes retain file type, signature, size and auth checks. Forms persist the provider URL. Provider and proxy acceptance remain open. |
 | Stripe and transactions | Checkout requires an owned, confirmed, unpaid booking. Signed test webhooks update the appointment and ledger transaction atomically. Duplicate event handling, closed sessions and definitive provider rejections are handled. Admins can release a recorded unpaid checkout after Stripe confirms its expiry. A stale ambiguous attempt whose session ID was never saved still requires operator reconciliation in Stripe. Live charges are disabled. |
-| UX and responsive QA | Existing layouts and design assets retained. Public homepage and catalogue were inspected on the existing Vercel build. Chromium verified public and auth layout widths at 390, 768 and 1440 pixels and exercised booking, account and admin flows against disposable MongoDB. Deployed HTTPS browser acceptance remains open. |
+| UX and responsive QA | Existing layouts and design assets retained. Public homepage and catalogue were inspected on the existing Vercel build. Chromium verified public and auth layout widths at 390, 768, 1024 and 1440 pixels and exercised booking, account and admin flows against disposable MongoDB. Deployed HTTPS browser acceptance remains open. |
 | Documentation and delivery | Both READMEs updated. Historical reports retained. OpenAPI describes the current readiness, availability and payment routes. |
-| Separate repositories and Git history | The Client and Server remain independent. GitHub listed 2 Client and 5 Server commits on the starting main branches. The assignment requires 20 Client and 12 Server commits. These draft branches add 11 Client and 10 Server commits, giving 13 Client and 15 Server commits if the branches are merged with history preserved. The Client threshold is still short by seven commits. Verify the submitted default-branch history before grading. |
+| Separate repositories and Git history | The Client and Server remain independent. GitHub listed 2 Client and 5 Server commits on the starting main branches. The assignment requires 20 Client and 12 Server commits. Including this report, the draft branches add 12 Client and 14 Server commits. With a history-preserving merge, the Client would be six commits short of its assignment threshold. Verify the submitted default-branch history before grading. |
 
-## Verification
+## Phase 4 verification
 
-- Browser inspection of the existing public homepage and catalogue reproduced the API failure. The same-origin health rewrite returned Vercel `404 DNS_HOSTNAME_RESOLVED_PRIVATE`.
-- [Server CI](https://github.com/Abir-Hossan/SalonBook-Server/actions/runs/45566328333) passed dependency installation, TypeScript, ESLint, production build and **102 tests across 10 suites** on a disposable MongoDB replica set. It exercised HTTPS cookie flags, session refresh, signed JWT and logout, mocked Google OAuth and ImgBB, Stripe test events and admin release, database persistence and concurrent booking.
-- [Client CI](https://github.com/Abir-Hossan/SalonBook-Client/actions/runs/45566860531) passed dependency installation, TypeScript, ESLint, production build and the browser journey. Chromium verified six services, catalogue search and recovery from a simulated network failure, registration, booking resume after reload, appointment confirmation and cancellation, profile persistence, payment history, role protection, sign-out, and three viewport widths. The browser ran the real Client and Server against a disposable database.
-- The local Node 24 execution parsed 50 server TypeScript files and exercised the real appointment service with in-memory repositories. It verified calendar timezone, slot validation, role and ownership rules, price and duration snapshots, overlapping and adjacent bookings, cancellation/rebooking and competing state transitions.
-- The local client configuration check rejected missing and loopback production targets and generated the expected HTTPS API and Better Auth rewrites.
-- npm package installation in this workspace was blocked by `ENOTFOUND registry.npmjs.org`. The historical reports record earlier passing checks; those runs do not verify the completion branches.
-- Atlas TLS remains **unverified**. A dedicated authorized QA URI and hostname were unavailable. Current workspace credentials, external provider accounts and production MongoDB were outside the observed verification scope. Use an isolated QA deployment and leave TLS and certificate verification enabled.
+| Status | Evidence |
+| --- | --- |
+| VERIFIED | Public Render readiness returned `status: ready` after the free-tier wake-up. The Vercel `/salon-api/health` rewrite returned production API JSON. The catalogue displayed eight live services and a service detail displayed bookable times. |
+| FAILED / BLOCKED | GitHub recorded a [failed Vercel check](https://vercel.com/abir-hossan/salonbook-client/GVPLRfgiNpvmPknvb8yrej8xeGKq) on the prior Client head. The Build Logs require sign-in and the exact error remains unconfirmed. The updated Client head had no Vercel status when inspected. |
+| FIXED | Builds, rewrites and SSR reads now use one validated Client API target. API calls have a timeout, and catalogue reads handle cold-start HTML as a temporary API failure. The appointment dialog uses native keyboard and focus behavior. |
+| FIXED | The Server verifies the checkout amount, currency and booking identifiers before storing a Stripe test session or returning its link. The regression test covers mismatch rejection, owner and status rules, idempotent retry and session reuse. |
+| PASSED | [Server CI](https://github.com/Abir-Hossan/SalonBook-Server/actions/runs/45650810875) ran npm ci, TypeScript, ESLint, production build and **109 tests in 12 suites**. The tests used disposable MongoDB and controlled Stripe, OAuth and image-provider responses. |
+| PASSED | [Client CI](https://github.com/Abir-Hossan/SalonBook-Client/actions/runs/45650610582) ran npm ci, two configuration tests, TypeScript, ESLint, production build and Chromium. Browser coverage included catalogue retry, auth, booking, payment return screens, profile, admin catalogue CRUD and blocking, keyboard dialog behavior and four viewport widths. npm ci reported zero vulnerabilities in both repositories at the time of the run. |
+| NOT VERIFIED | Live authenticated booking and admin, Google OAuth, ImgBB, an actual Stripe test-mode payment and direct Atlas TLS from hosting. Password recovery and email verification still require an email delivery integration. |
 
 ## Deploy and verify the Server
 
@@ -65,6 +67,6 @@ See [Atlas database users](https://www.mongodb.com/docs/atlas/security-add-mongo
 
 ## Deploy and verify the Client
 
-Set the Vercel project's `SALONBOOK_API_URL` to the actual public Express HTTPS URL ending in `/api` and redeploy the Client completion branch to its staging origin. The production build now rejects an absent or loopback API URL. Check Server readiness directly and through the Vercel rewrite before verifying the catalogue. Then run the end-to-end customer and admin journey on desktop, tablet and mobile, including a duplicate booking race and a Stripe test payment. Confirm dashboard records, image upload, Google callback, secure cookies, reload behavior and unauthorized access. Use production only after this staging run passes.
+The public Client currently reaches `https://salonbook-server-p0f1.onrender.com/api`. For Preview, read the first error in the authenticated Vercel Build Logs. Check the Preview-specific `SALONBOOK_API_URL` if the error identifies it. Full authenticated preview acceptance should use an isolated HTTPS API and database with Better Auth configured for the stable preview Client origin.
 
 Official references: [Render Node web services](https://render.com/docs/web-services), [Render shell access](https://render.com/docs/ssh), [Atlas connection troubleshooting](https://www.mongodb.com/docs/atlas/troubleshoot-connection/), [Vercel private DNS error](https://vercel.com/docs/errors/DNS_HOSTNAME_RESOLVED_PRIVATE), [Better Auth sessions](https://better-auth.com/docs/concepts/session-management), [Stripe Checkout fulfillment](https://docs.stripe.com/checkout/fulfillment).

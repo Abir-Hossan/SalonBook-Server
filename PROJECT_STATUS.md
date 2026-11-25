@@ -4,7 +4,7 @@ Updated 25 November 2026.
 
 ## Release status
 
-**Phase 4 public smoke and isolated acceptance passed. Vercel Preview and live provider acceptance remain open.** The public Vercel Client reached the Render Server after it resumed from idle.
+**Release sign-off is blocked on same-commit Vercel Preview verification. Phase 4 public smoke and isolated acceptance passed.** The public Vercel Client reached the Render Server after it resumed from idle.
 
 | Component | Location |
 | --- | --- |
@@ -42,6 +42,20 @@ Next.js serves the public site and dashboards, using same-origin rewrites to the
 | PASSED | [Server CI](https://github.com/Abir-Hossan/SalonBook-Server/actions/runs/45650810875) ran npm ci, TypeScript, ESLint, production build and **109 tests in 12 suites**. The tests used disposable MongoDB and controlled Stripe, OAuth and image-provider responses. |
 | PASSED | [Client CI](https://github.com/Abir-Hossan/SalonBook-Client/actions/runs/45650610582) ran npm ci, two configuration tests, TypeScript, ESLint, production build and Chromium. Browser coverage included catalogue retry, auth, booking, payment return screens, profile, admin catalogue CRUD and blocking, keyboard dialog behavior and four viewport widths. npm ci reported zero vulnerabilities in both repositories at the time of the run. |
 | NOT VERIFIED | Live authenticated booking and admin, Google OAuth, ImgBB, an actual Stripe test-mode payment and direct Atlas TLS from hosting. Password recovery and email verification still require an email delivery integration. |
+
+## Final release audit — 25 November 2026
+
+| Area | Finding |
+| --- | --- |
+| Release | **BLOCKED** pending confirmation of a successful Vercel Preview for the exact Client PR head. The public production smoke and isolated CI runs passed. |
+| Vercel Preview | The project owner reports setting `SALONBOOK_API_URL` for Preview and seeing a Ready deployment. The latest Vercel deployment status visible on Client head `b6014a4c86b9d6a8fc1f23c457597e71bc481044` still shows [deployment failed](https://vercel.com/abir-hossan/salonbook-client/DATb7n2ndveExs3cnHvN4isukcs1). The deployment dashboard requires sign-in. The Ready deployment's ID, environment, source SHA and resolution of the earlier build error remain independently unverified. |
+| Client CI | [Attempt 2 passed](https://github.com/Abir-Hossan/SalonBook-Client/actions/runs/45650610582/attempts/2) for Client PR head `b6014a4`. The verification job passed configuration tests, TypeScript, ESLint and the production build. The Chromium rerun used Server `dcd633857ad1e50ca638fcc39b7b32ec765cc6f8` and passed booking, authentication, administration and layout checks at 390, 768, 1024 and 1440 px. These tests used an isolated stack. |
+| Server CI | [Run 45651204922 passed](https://github.com/Abir-Hossan/SalonBook-Server/actions/runs/45651204922) for the audited Server head `dcd6338`. TypeScript, ESLint, the production build and 109 tests across 12 files passed with disposable MongoDB. |
+| Live smoke | Verified at desktop width on the [public Client](https://salonbook-client-ivory.vercel.app/). The homepage showed six featured services, the catalogue showed eight, and a service detail displayed six availability options. The same-origin health and availability routes returned successful API responses. Live mobile and tablet widths remain unverified. |
+| Merge readiness | [Client PR #1](https://github.com/Abir-Hossan/SalonBook-Client/pull/1) and [Server PR #1](https://github.com/Abir-Hossan/SalonBook-Server/pull/1) are open drafts and GitHub reported no merge conflicts. Server verification passed. Keep the Client in draft until the Vercel deployment and GitHub check agree on the exact head. |
+| Live acceptance | Deployed authentication, booking and admin flows, Google OAuth, ImgBB, Stripe test-mode payment and a direct Atlas TLS check from the host remain unverified. Email delivery is still required for password recovery and verification. |
+
+Open the Ready deployment in Vercel and confirm its environment is Preview and its source SHA is `b6014a4c86b9d6a8fc1f23c457597e71bc481044`. If its source differs, deploy that exact head. Confirm the successful deployment status on Client PR #1 before marking it ready for review.
 
 ## Deploy and verify the Server
 

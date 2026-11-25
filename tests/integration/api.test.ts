@@ -2,6 +2,13 @@ import {describe,it,expect} from 'vitest';import request from 'supertest';import
 const repositories=()=>({services:new MemoryServiceRepository(serviceSeed),appointments:new MemoryAppointmentRepository(appointmentSeed),users:new MemoryUserRepository(userSeed),transactions:new MemoryTransactionRepository(transactionSeed)});
 describe('SalonBook HTTP API',()=>{
 it('returns health information',async()=>{const response=await request(createApp()).get('/api/health').expect(200);expect(response.body.data.application).toBe('SalonBook API');expect(response.body.data.timestamp).toBeTruthy();});
+it('reports unavailable readiness when the production database and auth are not initialized',async()=>{const response=await request(createApp({enableMongoAuth:true})).get('/api/ready').expect(503);expect(response.body.data.status).toBe('unavailable');});
+it('preserves inactive service status on a partial edit and rejects empty edits',async()=>{
+  const api=request(createApp({repositories:repositories(),principalResolver:async()=>admin}));
+  const response=await api.patch('/api/services/'+ids.service2).send({price:220}).expect(200);
+  expect(response.body.data).toMatchObject({price:220,status:'inactive'});
+  await api.patch('/api/services/'+ids.service2).send({}).expect(400);
+});
 it('returns standard 404 response',async()=>{const response=await request(createApp()).get('/api/does-not-exist').expect(404);expect(response.body.success).toBe(false);});
 it('serves active services with pagination',async()=>{const response=await request(createApp({repositories:repositories()})).get('/api/services?limit=5').expect(200);expect(response.body.data).toHaveLength(1);expect(response.body.meta.total).toBe(1);});
 it('searches services',async()=>{const response=await request(createApp({repositories:repositories()})).get('/api/services?q=signature').expect(200);expect(response.body.data[0].serviceName).toBe('Signature Blowout');});

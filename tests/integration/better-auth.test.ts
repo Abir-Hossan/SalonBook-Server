@@ -186,6 +186,42 @@ describe.skipIf(!localUri && !atlasUri)('Better Auth with disposable MongoDB (' 
     expect(await TransactionModel.countDocuments({ appointmentId: booking._id })).toBe(1);
   });
 
+  it('lets an admin release a recorded test checkout after Stripe confirms expiry', async () => {
+    const admin = request.agent(app());
+    await signIn(admin, 'admin').expect(200);
+    const customer = request.agent(app());
+    const user = await signUp(customer, 'checkout-release').expect(201);
+    const attempt = '540be2c0-9832-426a-86d7-619cdde7a03d';
+    const sessionId = 'cs_test_checkout_release';
+    const booking = await AppointmentModel.create({
+      serviceId: ids.service, customerId: user.body.data.id, appointmentDate: '2099-08-09',
+      timeSlot: '01:00 PM', servicePrice: 165, status: 'confirmed', paymentStatus: 'unpaid',
+      checkoutAttempt: attempt, checkoutSessionId: sessionId,
+    });
+    const data = { appointmentId: String(booking._id) };
+    const release = (agent: typeof admin) => agent.post('/api/payments/release-checkout').set('Origin', origin).send(data);
+    await release(customer).expect(403);
+    await admin.patch('/api/admin/appointments/' + data.appointmentId + '/cancel').set('Origin', origin).expect(409);
+    vi.stubGlobal('fetch', vi.fn(async (target: string, options?: RequestInit) => {
+      const expiry = target.endsWith('/expire');
+      expect(target).toBe('https://api.stripe.com/v1/checkout/sessions/' + sessionId + (expiry ? '/expire' : ''));
+      expect(options?.method).toBe(expiry ? 'POST' : undefined);
+      return Response.json({
+        id: sessionId, status: expiry ? 'expired' : 'open', payment_status: 'unpaid',
+        amount_total: 16500, currency: 'usd', livemode: false, metadata: { ...data, attempt },
+      });
+    }));
+    try {
+      await release(admin).expect(200);
+      const updated = await AppointmentModel.findById(booking._id);
+      expect(updated?.checkoutAttempt).toBeUndefined();
+      expect(updated?.paymentStatus).toBe('unpaid');
+      await admin.patch('/api/admin/appointments/' + data.appointmentId + '/cancel').set('Origin', origin).expect(200);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('rejects a blocked account at login and after an administrator blocks its live session', async () => {
     const agent = request.agent(app());
     const created = await signUp(agent, 'blocked').expect(201);

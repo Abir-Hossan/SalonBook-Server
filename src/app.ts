@@ -15,7 +15,7 @@ export function createApp(options:AppOptions={}):Express{const app=express();con
  });
  if (options.enableMongoAuth) app.post('/api/payments/webhook', ...stripeWebhook);
  app.use('/api/admin',rateLimit({windowMs:15*60*1000,limit:60,standardHeaders:'draft-7',legacyHeaders:false,message:{success:false,message:'Too many administrative requests. Please try again later.',errors:[{code:'ADMIN_RATE_LIMITED'}]}}));
- app.use('/api/appointments',rateLimit({windowMs:15*60*1000,limit:20,standardHeaders:'draft-7',legacyHeaders:false,message:{success:false,message:'Too many appointment requests. Please try again later.',errors:[{code:'BOOKING_RATE_LIMITED'}]}}));
+ app.post('/api/appointments',rateLimit({windowMs:15*60*1000,limit:20,standardHeaders:'draft-7',legacyHeaders:false,message:{success:false,message:'Too many appointment requests. Please try again later.',errors:[{code:'BOOKING_RATE_LIMITED'}]}}));
  app.use('/api',rateLimit({windowMs:15*60*1000,limit:300,standardHeaders:'draft-7',legacyHeaders:false,message:{success:false,message:'Too many requests. Please try again later.',errors:[{code:'RATE_LIMITED'}]}}));
  if (options.enableMongoAuth) {
    app.use('/api', (req, _res, next) => {

@@ -127,7 +127,7 @@ export function paymentRoutes() {
       throw new AppError(409, 'Checkout has completed. Reconcile the payment and review the appointment.', 'CHECKOUT_COMPLETED');
     }
     await recordPayment(checkout);
-    success(res, 'Checkout released.');
+    success(res, 'Checkout released.', null);
   }));
   router.get('/availability', ...customer, (_req, res) => success(res, 'Payment availability.', { stripe: isConfigured() }));
   router.post('/checkout', ...customer, asyncHandler(async (req, res) => {

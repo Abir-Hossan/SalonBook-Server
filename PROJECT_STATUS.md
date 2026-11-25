@@ -4,7 +4,7 @@ Updated 25 November 2026.
 
 ## Release status
 
-**Release sign-off is blocked on same-commit Vercel Preview verification. Phase 4 public smoke and isolated acceptance passed.** The public Vercel Client reached the Render Server after it resumed from idle.
+**Vercel Preview and CI passed for the current release candidate. Assignment submission remains blocked on the Client commit requirement.** See the latest reconciliation below.
 
 | Component | Location |
 | --- | --- |
@@ -29,7 +29,7 @@ Next.js serves the public site and dashboards, using same-origin rewrites to the
 | Stripe and transactions | Checkout requires an owned, confirmed, unpaid booking. Signed test webhooks update the appointment and ledger transaction atomically. Duplicate event handling, closed sessions and definitive provider rejections are handled. Admins can release a recorded unpaid checkout after Stripe confirms its expiry. A stale ambiguous attempt whose session ID was never saved still requires operator reconciliation in Stripe. Live charges are disabled. |
 | UX and responsive QA | Existing layouts and design assets retained. Public homepage and catalogue were inspected on the existing Vercel build. Chromium verified public and auth layout widths at 390, 768, 1024 and 1440 pixels and exercised booking, account and admin flows against disposable MongoDB. Deployed HTTPS browser acceptance remains open. |
 | Documentation and delivery | Both READMEs updated. Historical reports retained. OpenAPI describes the current readiness, availability and payment routes. |
-| Separate repositories and Git history | The Client and Server remain independent. GitHub listed 2 Client and 5 Server commits on the starting main branches. The assignment requires 20 Client and 12 Server commits. The Client draft branch adds 12 commits. With a history-preserving merge, the Client would be six commits short of its assignment threshold. Verify the submitted default-branch history before grading. |
+| Separate repositories and Git history | The Client and Server remain independent. The Client completion branch now contains 17 reachable commits, including both `main` commits. The assignment requires 20 meaningful Client commits and 12 Server commits. The Client is three commits short after a history-preserving merge. |
 
 ## Phase 4 verification
 
@@ -43,7 +43,7 @@ Next.js serves the public site and dashboards, using same-origin rewrites to the
 | PASSED | [Client CI](https://github.com/Abir-Hossan/SalonBook-Client/actions/runs/45650610582) ran npm ci, two configuration tests, TypeScript, ESLint, production build and Chromium. Browser coverage included catalogue retry, auth, booking, payment return screens, profile, admin catalogue CRUD and blocking, keyboard dialog behavior and four viewport widths. npm ci reported zero vulnerabilities in both repositories at the time of the run. |
 | NOT VERIFIED | Live authenticated booking and admin, Google OAuth, ImgBB, an actual Stripe test-mode payment and direct Atlas TLS from hosting. Password recovery and email verification still require an email delivery integration. |
 
-## Final release audit — 25 November 2026
+## Final release audit — 25 November 2026 (historical snapshot)
 
 | Area | Finding |
 | --- | --- |
@@ -56,6 +56,21 @@ Next.js serves the public site and dashboards, using same-origin rewrites to the
 | Live acceptance | Deployed authentication, booking and admin flows, Google OAuth, ImgBB, Stripe test-mode payment and a direct Atlas TLS check from the host remain unverified. Email delivery is still required for password recovery and verification. |
 
 Open the Ready deployment in Vercel and confirm its environment is Preview and its source SHA is `b6014a4c86b9d6a8fc1f23c457597e71bc481044`. If its source differs, deploy that exact head. Confirm the successful deployment status on Client PR #1 before marking it ready for review.
+
+## Release reconciliation — 25 November 2026
+
+| Area | Current evidence |
+| --- | --- |
+| Release | **BLOCKED for assignment submission**. The current Client Preview and both repositories' CI passed. The Client is still three meaningful commits short. |
+| Client and Preview | Client head `c954028a3495d97c1d07efa317530d18b7f68e59`. Vercel's [commit status](https://github.com/Abir-Hossan/SalonBook-Client/commit/c954028a3495d97c1d07efa317530d18b7f68e59) reported **Deployment has completed** at 22:40 Dhaka time. The [Vercel GitHub App](https://github.com/Abir-Hossan/SalonBook-Client/pull/1#issuecomment-7155443708) identified the same [deployment](https://vercel.com/abir-hossan/salonbook-client/5ZSM4HL4JDpnmL21e3NarhcdEPve) as **Ready** and linked its [Preview URL](https://salonbook-client-git-completion-assignment-r-82c2f1-abir-hossan.vercel.app). The authenticated dashboard and protected Preview runtime were inaccessible. The historical failed status on `b6014a4` remains on that commit. Its underlying build error and the reported Ready Production deployment's source SHA could not be independently confirmed. |
+| Client configuration | Preview and Production builds require a public HTTPS Express `/api` URL. Next.js uses one validator for rewrites and SSR reads. Missing or invalid configuration produces an explicit build error without echoing the value. The current Preview passed with no repository configuration change. |
+| Client CI | [Run 45656277232](https://github.com/Abir-Hossan/SalonBook-Client/actions/runs/45656277232) passed npm ci, configuration tests, TypeScript, ESLint, the production build and Chromium acceptance. The browser job checked out Server `c890f75d69bfaae1d7322976b4dd5efeb41a04ab` and covered category-request recovery, read-only payment-status retry and keyboard navigation, along with the existing end-to-end checks. |
+| Server CI | [Run 45654460876](https://github.com/Abir-Hossan/SalonBook-Server/actions/runs/45654460876) passed TypeScript, ESLint, the production build and 109 tests across 12 files for `c890f75d69bfaae1d7322976b4dd5efeb41a04ab`, the Server head audited before this documentation update. |
+| Git history | Client `main` has 2 commits, both reachable from the completion head. The completion branch has 17 reachable commits, including 15 beyond `main`. A history-preserving merge would retain all 17 existing commits. The assignment requires 20 meaningful commits, leaving a deficit of 3. |
+| Public connectivity | The public Client [API health rewrite](https://salonbook-client-ivory.vercel.app/salon-api/health) returned production API JSON with status `ok`. The [Render readiness endpoint](https://salonbook-server-p0f1.onrender.com/api/ready) returned `ready`. Those responses do not identify the Client production deployment SHA. |
+| Live acceptance | Protected Preview runtime, live authenticated booking and administration, Google OAuth, ImgBB uploads, Stripe test-mode payment, live mobile and tablet rendering, and a direct host-to-Atlas TLS check remain unverified. Password recovery and email verification still need email delivery. |
+
+Both PRs remain drafts. Confirm the Production deployment source and perform an authenticated read-only Preview health check in Vercel. Complete the remaining assignment work through genuine changes and use a history-preserving merge after review.
 
 ## Deploy and verify the Server
 

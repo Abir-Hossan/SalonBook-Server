@@ -111,6 +111,16 @@ paths:
           description: Appointment is ineligible
         '503':
           description: Test-mode checkout is unconfigured
+  /payments/release-checkout:
+    post:
+      summary: Admin-only expiry of a recorded unpaid Stripe test checkout
+      responses:
+        '200':
+          description: Checkout released
+        '403':
+          description: Administrator role required
+        '409':
+          description: Provider review required
   /payments/webhook:
     post:
       summary: Process a signed Stripe test-mode event

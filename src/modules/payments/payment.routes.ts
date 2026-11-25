@@ -62,7 +62,7 @@ async function recordPayment(checkout: z.infer<typeof sessionSchema>) {
   const appointmentId = checkout.metadata.appointmentId;
   const attempt = checkout.metadata.attempt;
   if (checkout.status === 'expired') {
-    await AppointmentModel.updateOne({ _id: appointmentId, checkoutAttempt: attempt, paymentStatus: 'unpaid' },
+    await AppointmentModel.updateOne({ _id: appointmentId, checkoutAttempt: attempt, paymentStatus: 'unpaid', $or: [{ checkoutSessionId: checkout.id }, { checkoutSessionId: { $exists: false } }] },
       { $unset: { checkoutAttempt: '', checkoutStartedAt: '', checkoutSessionId: '' } });
     return;
   }
@@ -103,6 +103,32 @@ export const stripeWebhook = [
 export function paymentRoutes() {
   const router = Router();
   const customer = [authenticate(mongoPrincipalResolver), authorize('customer')];
+  router.post('/release-checkout', authenticate(mongoPrincipalResolver), authorize('admin'), asyncHandler(async (req, res) => {
+    configured();
+    const { appointmentId } = z.object({ appointmentId: idSchema }).strict().parse(req.body);
+    const appointment = await AppointmentModel.findOne({ _id: appointmentId, paymentStatus: 'unpaid', checkoutAttempt: { $exists: true } });
+    if (!appointment?.checkoutSessionId) {
+      throw new AppError(409, 'No recorded Checkout session can be released. Reconcile the attempt in Stripe first.', 'CHECKOUT_RECONCILIATION_REQUIRED');
+    }
+    const path = '/' + encodeURIComponent(appointment.checkoutSessionId);
+    let checkout = await stripe(path);
+    if (checkout.metadata.appointmentId !== String(appointment._id) || checkout.metadata.attempt !== appointment.checkoutAttempt) {
+      throw new AppError(409, 'Checkout does not match the appointment.', 'PAYMENT_MISMATCH');
+    }
+    if (checkout.status === 'open') {
+      try {
+        checkout = await stripe(path + '/expire', { method: 'POST' });
+      } catch (error) {
+        if (!(error instanceof StripeRequestError) || error.providerStatus !== 400) throw error;
+        checkout = await stripe(path);
+      }
+    }
+    if (checkout.status !== 'expired') {
+      throw new AppError(409, 'Checkout has completed. Reconcile the payment and review the appointment.', 'CHECKOUT_COMPLETED');
+    }
+    await recordPayment(checkout);
+    success(res, 'Checkout released.');
+  }));
   router.get('/availability', ...customer, (_req, res) => success(res, 'Payment availability.', { stripe: isConfigured() }));
   router.post('/checkout', ...customer, asyncHandler(async (req, res) => {
     configured();

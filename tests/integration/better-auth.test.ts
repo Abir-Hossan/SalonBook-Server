@@ -18,6 +18,7 @@ vi.hoisted(() => {
   process.env.GOOGLE_CLIENT_SECRET = 'salonbook-oauth-test-secret';
   process.env.STRIPE_SECRET_KEY = 'sk_test_mock';
   process.env.STRIPE_WEBHOOK_SECRET = 'whsec_mock';
+  process.env.IMGBB_API_KEY = 'imgbb_mock';
 });
 
 const localUri = process.env.SALONBOOK_AUTH_TEST_URI;
@@ -113,6 +114,52 @@ describe.skipIf(!localUri && !atlasUri)('Better Auth with disposable MongoDB (' 
     await request(app()).get('/api/auth/me').set('Authorization', 'Bearer broken.jwt.value').expect(401);
     await agent.post('/api/auth/sign-out').set('Origin', origin).expect(204);
     await bearer().expect(401);
+  });
+
+  it('renews remembered sessions and preserves the short-session expiry', async () => {
+    const agent = request.agent(app());
+    const created = await signUp(agent, 'remember').expect(201);
+    const sessions = mongoose.connection.db!.collection('BetterAuthSessions');
+    const owner = { userId: new mongoose.Types.ObjectId(created.body.data.id) };
+    const short = await sessions.findOne(owner);
+    await agent.get('/api/better-auth/get-session').expect(200);
+    expect((await sessions.findOne(owner))?.expiresAt).toEqual(short?.expiresAt);
+    await agent.post('/api/auth/sign-in').set('Origin', origin).send({ email: patron('remember').email, password, remember: true }).expect(200);
+    const day = 86400000;
+    const remembered = await sessions.findOne({ ...owner, expiresAt: { $gt: new Date(Date.now() + 2 * day) } });
+    expect(remembered).not.toBeNull();
+    await sessions.updateOne({ _id: remembered!._id }, {
+      $set: { expiresAt: new Date(Date.now() + 8 * day), createdAt: new Date(Date.now() - 22 * day) },
+    });
+    await agent.get('/api/better-auth/get-session').expect(200);
+    expect((await sessions.findOne({ _id: remembered!._id }))!.expiresAt!.getTime()).toBeGreaterThan(Date.now() + 20 * day);
+  });
+
+  it('authorizes, validates and saves an uploaded service image using a controlled provider response', async () => {
+    const admin = request.agent(app());
+    await signIn(admin, 'admin').expect(200);
+    const customer = request.agent(app());
+    await signUp(customer, 'image-customer').expect(201);
+    const png = Buffer.from('89504e470d0a1a0a', 'hex');
+    const upload = (agent: typeof admin, body: Buffer) => agent.post('/api/admin/images/service').set('Origin', origin).set('Content-Type', 'image/png').send(body);
+    await upload(customer, png).expect(403);
+    await upload(admin, Buffer.from('invalid')).expect(415);
+    const img = 'https://i.ibb.co/example/salon.png';
+    vi.stubGlobal('fetch', vi.fn(async (target: URL) => {
+      expect(target.host).toBe('api.imgbb.com');
+      return Response.json({ success: true, data: { url: img } });
+    }));
+    try {
+      const response = await upload(admin, png).expect(201);
+      expect(response.body.data.image).toBe(img);
+      const saved = await admin.post('/api/services').set('Origin', origin).send({
+        serviceName: 'Service image acceptance', category: 'Beauty', description: 'Service with a verified image upload.',
+        price: 30, duration: 60, image: img,
+      }).expect(201);
+      expect((await ServiceModel.findById(saved.body.data.id))?.image).toBe(img);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('validates Stripe test webhooks and records a paid appointment only once', async () => {

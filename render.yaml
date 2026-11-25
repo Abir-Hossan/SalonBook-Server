@@ -2,6 +2,7 @@ services:
   - type: web
     name: salonbook-api
     runtime: node
+    plan: free
     buildCommand: npm ci --include=dev && npm run build
     startCommand: npm start
     healthCheckPath: /api/ready

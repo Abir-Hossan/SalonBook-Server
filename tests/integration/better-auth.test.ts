@@ -324,4 +324,14 @@ describe.skipIf(!localUri && !atlasUri)('Better Auth with disposable MongoDB (' 
     await agent.patch('/api/appointments/' + id + '/cancel').set('Origin', origin).expect(200);
     expect((await AppointmentModel.findById(id).lean())?.status).toBe('cancelled');
   });
+
+  it('sets Secure and HttpOnly cookies when Better Auth uses an HTTPS origin', async () => {
+    await initializeBetterAuth({ origin: 'https://client.example.test', secret: randomBytes(48).toString('hex') });
+    const response = await signUp(request.agent(app()), 'https-cookie').expect(201);
+    const cookies = response.headers['set-cookie'] as unknown as string[];
+    const sessionCookie = cookies.find((value) => value.startsWith('__Secure-salonbook.session_token='));
+    expect(Boolean(sessionCookie && /;\s*Secure(?:;|$)/i.test(sessionCookie))).toBe(true);
+    expect(Boolean(sessionCookie && /;\s*HttpOnly(?:;|$)/i.test(sessionCookie))).toBe(true);
+    expect(Boolean(sessionCookie && /;\s*SameSite=Lax(?:;|$)/i.test(sessionCookie))).toBe(true);
+  });
 });

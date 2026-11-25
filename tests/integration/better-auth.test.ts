@@ -186,6 +186,64 @@ describe.skipIf(!localUri && !atlasUri)('Better Auth with disposable MongoDB (' 
     expect(await TransactionModel.countDocuments({ appointmentId: booking._id })).toBe(1);
   });
 
+  it('starts only eligible owned Stripe test checkouts and reuses only a matching provider session', async () => {
+    const owner = request.agent(app());
+    const user = await signUp(owner, 'checkout-owner').expect(201);
+    const other = request.agent(app());
+    await signUp(other, 'checkout-other').expect(201);
+    const booking = await AppointmentModel.create({
+      serviceId: ids.service, customerId: user.body.data.id, appointmentDate: '2099-09-10',
+      timeSlot: '01:00 PM', servicePrice: 165, status: 'pending', paymentStatus: 'unpaid',
+    });
+    const appointmentId = String(booking._id);
+    const checkout = (agent: typeof owner) =>
+      agent.post('/api/payments/checkout').set('Origin', origin).send({ appointmentId });
+    const sessionId = 'cs_test_release_verification';
+    const checkoutUrl = 'https://checkout.stripe.com/c/pay/' + sessionId;
+    let attempt = '';
+    let amount = 1;
+    const provider = vi.fn(async (target: string, options?: RequestInit) => {
+      if (options?.method === 'POST') {
+        expect(target).toBe('https://api.stripe.com/v1/checkout/sessions');
+        const params = options.body as URLSearchParams;
+        const submitted = params.get('metadata[attempt]')!;
+        expect(new Headers(options.headers).get('Idempotency-Key')).toBe(submitted);
+        expect(params.get('line_items[0][price_data][unit_amount]')).toBe('16500');
+        expect(params.get('metadata[appointmentId]')).toBe(appointmentId);
+        expect(params.get('success_url')).toBe(new URL('/payment/success?appointment=' + appointmentId, env.CLIENT_URL).href);
+        expect(params.get('cancel_url')).toBe(new URL('/payment/cancel', env.CLIENT_URL).href);
+        if (attempt) expect(submitted).toBe(attempt);
+        attempt = submitted;
+      } else {
+        expect(target).toBe('https://api.stripe.com/v1/checkout/sessions/' + sessionId);
+      }
+      return Response.json({
+        id: sessionId, url: checkoutUrl, status: 'open', payment_status: 'unpaid', amount_total: amount,
+        currency: 'usd', livemode: false, metadata: { appointmentId, attempt },
+      });
+    });
+    vi.stubGlobal('fetch', provider);
+    try {
+      await checkout(owner).expect(422);
+      await AppointmentModel.updateOne({ _id: booking._id }, { $set: { status: 'confirmed' } });
+      await checkout(other).expect(422);
+      expect(provider).toHaveBeenCalledTimes(0);
+
+      const mismatch = await checkout(owner).expect(502);
+      expect(mismatch.body.errors[0].code).toBe('CHECKOUT_SESSION_MISMATCH');
+      expect((await AppointmentModel.findById(booking._id))?.checkoutSessionId).toBeUndefined();
+      amount = 16500;
+      expect((await checkout(owner).expect(200)).body.data.url).toBe(checkoutUrl);
+      expect((await checkout(owner).expect(200)).body.data.url).toBe(checkoutUrl);
+      const stored = await AppointmentModel.findById(booking._id);
+      expect(stored?.checkoutSessionId).toBe(sessionId);
+      expect(stored?.paymentStatus).toBe('unpaid');
+      expect(provider).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('lets an admin release a recorded test checkout after Stripe confirms expiry', async () => {
     const admin = request.agent(app());
     await signIn(admin, 'admin').expect(200);

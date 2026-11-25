@@ -140,6 +140,7 @@ export function paymentRoutes() {
     if (!booking?.checkoutAttempt) throw new AppError(422, 'Only confirmed unpaid appointments can be paid.', 'PAYMENT_NOT_ELIGIBLE');
     const redirectBase = new URL(env.CLIENT_URL);
     const bookingId = String(booking._id);
+    const amount = Math.round(booking.servicePrice * 100);
     let checkout;
     if (booking.checkoutSessionId) {
       checkout = await stripe('/' + encodeURIComponent(booking.checkoutSessionId));
@@ -153,7 +154,7 @@ export function paymentRoutes() {
         cancel_url: new URL('/payment/cancel', redirectBase).href,
         'metadata[appointmentId]': bookingId, 'metadata[attempt]': booking.checkoutAttempt,
         'line_items[0][quantity]': '1', 'line_items[0][price_data][currency]': 'usd',
-        'line_items[0][price_data][unit_amount]': String(Math.round(booking.servicePrice * 100)),
+        'line_items[0][price_data][unit_amount]': String(amount),
         'line_items[0][price_data][product_data][name]': 'SalonBook appointment',
       });
       try {
@@ -166,7 +167,11 @@ export function paymentRoutes() {
         }
         throw error;
       }
-      await AppointmentModel.updateOne({ _id: booking._id, checkoutAttempt: booking.checkoutAttempt }, { $set: { checkoutSessionId: checkout.id } });
+    }
+    if (checkout.metadata.appointmentId !== bookingId || checkout.metadata.attempt !== booking.checkoutAttempt ||
+        checkout.currency !== 'usd' || checkout.amount_total !== amount ||
+        (booking.checkoutSessionId && booking.checkoutSessionId !== checkout.id)) {
+      throw new AppError(502, 'Checkout did not match this appointment.', 'CHECKOUT_SESSION_MISMATCH');
     }
     if (checkout.status !== 'open' || !checkout.url) {
       if (checkout.status === 'expired') await recordPayment(checkout);
@@ -174,6 +179,9 @@ export function paymentRoutes() {
     }
     if (new URL(checkout.url).hostname !== 'checkout.stripe.com' || !checkout.url.startsWith('https://')) {
       throw new AppError(502, 'The payment link could not be verified.', 'INVALID_CHECKOUT_URL');
+    }
+    if (!booking.checkoutSessionId) {
+      await AppointmentModel.updateOne({ _id: booking._id, checkoutAttempt: booking.checkoutAttempt }, { $set: { checkoutSessionId: checkout.id } });
     }
     success(res, 'Checkout created.', { url: checkout.url });
   }));

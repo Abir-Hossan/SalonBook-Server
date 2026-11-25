@@ -4,7 +4,7 @@ Updated 25 November 2026.
 
 ## Release status
 
-**Vercel Preview and CI passed for the current release candidate. Assignment submission remains blocked on the Client commit requirement.** See the latest reconciliation below.
+**The Client meets the 20-commit assignment requirement. Vercel Preview and CI passed for the current Client head.** Live acceptance remains open.
 
 | Component | Location |
 | --- | --- |
@@ -29,7 +29,7 @@ Next.js serves the public site and dashboards, using same-origin rewrites to the
 | Stripe and transactions | Checkout requires an owned, confirmed, unpaid booking. Signed test webhooks update the appointment and ledger transaction atomically. Duplicate event handling, closed sessions and definitive provider rejections are handled. Admins can release a recorded unpaid checkout after Stripe confirms its expiry. A stale ambiguous attempt whose session ID was never saved still requires operator reconciliation in Stripe. Live charges are disabled. |
 | UX and responsive QA | Existing layouts and design assets retained. Public homepage and catalogue were inspected on the existing Vercel build. Chromium verified public and auth layout widths at 390, 768, 1024 and 1440 pixels and exercised booking, account and admin flows against disposable MongoDB. Deployed HTTPS browser acceptance remains open. |
 | Documentation and delivery | Both READMEs updated. Historical reports retained. OpenAPI describes the current readiness, availability and payment routes. |
-| Separate repositories and Git history | The Client and Server remain independent. The Client completion branch now contains 17 reachable commits, including both `main` commits. The assignment requires 20 meaningful Client commits and 12 Server commits. The Client is three commits short after a history-preserving merge. |
+| Separate repositories and Git history | The Client and Server remain independent. The Client completion branch has 20 reachable meaningful commits, including both original `main` commits. A history-preserving merge retains the assignment history. |
 
 ## Phase 4 verification
 
@@ -57,7 +57,7 @@ Next.js serves the public site and dashboards, using same-origin rewrites to the
 
 Open the Ready deployment in Vercel and confirm its environment is Preview and its source SHA is `b6014a4c86b9d6a8fc1f23c457597e71bc481044`. If its source differs, deploy that exact head. Confirm the successful deployment status on Client PR #1 before marking it ready for review.
 
-## Release reconciliation — 25 November 2026
+## Release reconciliation — 25 November 2026 (historical snapshot)
 
 | Area | Current evidence |
 | --- | --- |
@@ -71,6 +71,14 @@ Open the Ready deployment in Vercel and confirm its environment is Preview and i
 | Live acceptance | Protected Preview runtime, live authenticated booking and administration, Google OAuth, ImgBB uploads, Stripe test-mode payment, live mobile and tablet rendering, and a direct host-to-Atlas TLS check remain unverified. Password recovery and email verification still need email delivery. |
 
 Both PRs remain drafts. Confirm the Production deployment source and perform an authenticated read-only Preview health check in Vercel. Complete the remaining assignment work through genuine changes and use a history-preserving merge after review.
+
+## Assignment Client completion — 25 November 2026
+
+- **VERIFIED**. Client `completion/assignment-readiness` reached **20 meaningful, reachable commits** at `bea0f86303a582ef2f0062faf039084d2cae645f`. The two original `main` commits remain in its ancestry. [Client PR #1](https://github.com/Abir-Hossan/SalonBook-Client/pull/1) has 18 branch-only commits, remains a draft, and is mergeable.
+- **FIXED**. A rejected booking date clears the selected time and explains the fallback to fresh availability. Mobile dashboard navigation keeps closed links out of keyboard navigation and returns focus after Escape. Payment history hides outdated rows during pagination and recovers if the current page disappears.
+- **PASSED**. [Client Actions run 45658361973](https://github.com/Abir-Hossan/SalonBook-Client/actions/runs/45658361973) passed npm ci, configuration tests, TypeScript, ESLint, production build and Chromium acceptance with the three new regression checks. The browser job used Server `4e4cd84d218dd6f5c0ab99b482822e637dda37bd`, which passed [Server CI](https://github.com/Abir-Hossan/SalonBook-Server/actions/runs/45656964792).
+- **VERIFIED**. Vercel posted a successful deployment status on the exact Client head and reported the [Preview deployment Ready](https://vercel.com/abir-hossan/salonbook-client/DAosxFN3RbYMbe2jjQe7dntRU69W) at 22:51 Dhaka time.
+- **NOT VERIFIED**. The protected Preview runtime and exact Production source SHA remain unverified. Live authenticated booking and admin flows, Google OAuth, ImgBB uploads, Stripe test-mode payment, live mobile and tablet rendering, and direct host-to-Atlas TLS also remain open. Preserve all 20 existing Client commits in the eventual reviewed merge.
 
 ## Deploy and verify the Server
 

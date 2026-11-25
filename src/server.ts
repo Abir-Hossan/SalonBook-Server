@@ -1,49 +1,59 @@
+import { once } from 'node:events';
 import { createServer } from 'node:http';
-import { createApp } from './app';
-import { env } from './config/env';
-import { logger } from './config/logger';
-import { connectDatabase, disconnectDatabase } from './database/connection';
-import { createMongoRepositories, seedMongoCatalog } from './database/repositories/mongo.repositories';
-import { initializeBetterAuth, validateBetterAuthConfig } from './modules/auth/better-auth';
-import { SessionModel } from './modules/auth/auth.routes';
-import { demoCatalog } from './repositories/demo-catalog';
+import { reportStartupFailure, startupStep } from './utils/startup-error';
+
+let disconnectDatabase: (() => Promise<void>) | undefined;
 
 async function start(): Promise<void> {
-  const authConfig = validateBetterAuthConfig();
-  await connectDatabase();
-  await initializeBetterAuth(authConfig);
-  await SessionModel.createIndexes();
+  const { env } = await startupStep('environment.validate', () => import('./config/env.js'));
+  const { logger } = await startupStep('logging.initialize', () => import('./config/logger.js'));
+  const database = await startupStep('mongodb.load', () => import('./database/connection.js'));
+  disconnectDatabase = database.disconnectDatabase;
+  const { initializeBetterAuth, validateBetterAuthConfig } = await startupStep('auth.load', () => import('./modules/auth/better-auth.js'));
+  const authConfig = await startupStep('auth.validate', validateBetterAuthConfig);
+
+  await database.connectDatabase();
+  await startupStep('auth.initialize', () => initializeBetterAuth(authConfig));
+  const { SessionModel } = await startupStep('auth.legacy.load', () => import('./modules/auth/auth.routes.js'));
+  await startupStep('mongodb.indexes.CustomerSessions', () => SessionModel.createIndexes());
+
+  const { createMongoRepositories, seedMongoCatalog } = await startupStep('repositories.load', () => import('./database/repositories/mongo.repositories.js'));
   if (env.NODE_ENV === 'development' && env.SEED_DEMO_CATALOG === 'true') {
-    await seedMongoCatalog(demoCatalog);
+    const { demoCatalog } = await startupStep('catalogue.load', () => import('./repositories/demo-catalog.js'));
+    await startupStep('catalogue.seed', () => seedMongoCatalog(demoCatalog));
     logger.info({ count: demoCatalog.length }, 'Demo service catalog ensured in MongoDB');
   }
-  const app = createApp({ repositories: createMongoRepositories(), enableMongoAuth: true });
+  const { createApp } = await startupStep('http.load', () => import('./app.js'));
+  const app = await startupStep('http.initialize', () => createApp({ repositories: createMongoRepositories(), enableMongoAuth: true }));
   const server = createServer(app);
-  server.listen(env.PORT, '0.0.0.0', () => logger.info({ port: env.PORT, environment: env.NODE_ENV }, 'SalonBook API listening'));
+  await startupStep('http.listen', async () => {
+    server.listen(env.PORT, '0.0.0.0');
+    await once(server, 'listening');
+  });
+  logger.info({ port: env.PORT, environment: env.NODE_ENV }, 'SalonBook API listening');
 
   const shutdown = (signal: string) => {
     logger.info({ signal }, 'Graceful shutdown requested');
+    const timeout = setTimeout(() => { logger.error('Forced shutdown after timeout'); process.exit(1); }, 10_000).unref();
     server.close(async (error) => {
       try {
-        await disconnectDatabase();
-        if (error) { logger.error({ err: error }, 'HTTP server shutdown failed'); process.exitCode = 1; }
+        await database.disconnectDatabase();
+        if (error) { logger.error({ errorName: error.name }, 'HTTP server shutdown failed'); process.exitCode = 1; }
         else { logger.info('HTTP server and MongoDB connection closed'); process.exitCode = 0; }
-      } catch (disconnectError) {
-        logger.error({ err: disconnectError }, 'MongoDB shutdown failed'); process.exitCode = 1;
+      } catch {
+        logger.error('MongoDB shutdown failed');
+        process.exitCode = 1;
+      } finally {
+        clearTimeout(timeout);
       }
     });
-    setTimeout(() => { logger.error('Forced shutdown after timeout'); process.exit(1); }, 10_000).unref();
   };
   process.once('SIGINT', () => shutdown('SIGINT'));
   process.once('SIGTERM', () => shutdown('SIGTERM'));
 }
 
-start().catch(async (error: unknown) => {
-  const failure = error instanceof Error ? error.name : 'UnknownError';
-  const cause = error instanceof Error ? error.cause : undefined;
-  const code = cause && typeof cause === 'object' && 'code' in cause && typeof cause.code === 'string'
-    && /^[A-Z0-9_]+$/.test(cause.code) ? cause.code : undefined;
-  logger.fatal({ failure, code }, 'SalonBook API failed to start. Check environment, MongoDB connectivity and index permissions.');
-  try { await disconnectDatabase(); } catch { logger.error('MongoDB cleanup failed'); }
+void start().catch(async (error: unknown) => {
   process.exitCode = 1;
+  reportStartupFailure('startup', error);
+  try { await disconnectDatabase?.(); } catch (cleanupError) { reportStartupFailure('mongodb.cleanup', cleanupError); }
 });

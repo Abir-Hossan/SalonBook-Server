@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { env } from '../../config/env';
 import { UserModel } from '../../database/models/user.model';
 import { AppError } from '../../utils/errors';
+import { startupStep } from '../../utils/startup-error';
 import { verifyLegacyPassword } from './legacy-password';
 
 export const betterAuthPath = '/api/better-auth';
@@ -32,14 +33,18 @@ const signUpDetails = z.object({
 export function validateBetterAuthConfig() {
   const secret = env.BETTER_AUTH_SECRET;
   const url = env.BETTER_AUTH_URL;
-  if (!secret || !url) throw new Error('BETTER_AUTH_SECRET and BETTER_AUTH_URL are required.');
+  if (!secret) throw new Error('BETTER_AUTH_SECRET is required.');
+  if (!url) throw new Error('BETTER_AUTH_URL is required.');
   const address = new URL(url);
   if (!['https:', 'http:'].includes(address.protocol) || address.href !== address.origin + '/' ||
       (env.NODE_ENV === 'production' && address.protocol !== 'https:')) {
     throw new Error('BETTER_AUTH_URL must be an HTTP(S) origin and use HTTPS in production.');
   }
-  if (env.NODE_ENV === 'production' && (new URL(env.CLIENT_URL).origin !== address.origin || !env.allowedOrigins.includes(address.origin))) {
-    throw new Error('CLIENT_URL and ALLOWED_ORIGINS must include the public BETTER_AUTH_URL origin.');
+  if (env.NODE_ENV === 'production' && new URL(env.CLIENT_URL).origin !== address.origin) {
+    throw new Error('CLIENT_URL must have the same public HTTPS origin as BETTER_AUTH_URL.');
+  }
+  if (env.NODE_ENV === 'production' && !env.allowedOrigins.includes(address.origin)) {
+    throw new Error('ALLOWED_ORIGINS must include the exact BETTER_AUTH_URL origin without a trailing slash.');
   }
   if (Boolean(env.GOOGLE_CLIENT_ID) !== Boolean(env.GOOGLE_CLIENT_SECRET)) {
     throw new Error('Set both Google OAuth credentials or leave both unset.');
@@ -56,10 +61,10 @@ async function createBetterAuth(config: ReturnType<typeof validateBetterAuthConf
   const accounts = db.collection(accountCollection);
   const sessions = db.collection<{ _id: string | mongoose.Types.ObjectId; userId: string | mongoose.Types.ObjectId; expiresAt: Date }>(sessionCollection);
   // Use the existing Mongoose MongoClient and the same database as the domain repositories.
-  await Promise.all([
-    accounts.createIndex({ providerId: 1, accountId: 1 }, { unique: true, name: 'salonbook_auth_provider_account' }),
-    sessions.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0, name: 'salonbook_auth_session_expiry' }),
-  ]);
+  await startupStep('mongodb.indexes.' + accountCollection, () =>
+    accounts.createIndex({ providerId: 1, accountId: 1 }, { unique: true, name: 'salonbook_auth_provider_account' }));
+  await startupStep('mongodb.indexes.' + sessionCollection, () =>
+    sessions.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0, name: 'salonbook_auth_session_expiry' }));
 
   async function bindAccount(providerId: string, accountId: string, userId: string, password?: string) {
     const now = new Date();

@@ -49,6 +49,20 @@ Next.js serves the public site and dashboards, using same-origin rewrites to the
 4. From an authorized machine with the same Atlas configuration in its environment, run `npm ci` and `npm run build` in the Server checkout, then run `npm run seed:catalog` and verify the active count. The Render free tier has no interactive shell. Create the intended operator through normal registration. With that account's owner-authorized email configured as `SALONBOOK_BOOTSTRAP_ADMIN_EMAIL`, run `npm run bootstrap:admin` in a controlled Server environment. Remove the temporary setting after the role is confirmed.
 5. Configure `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and the exact HTTPS Client callback `/api/better-auth/callback/google`. Add `IMGBB_API_KEY` for image uploads. Configure a Stripe test secret key and `STRIPE_WEBHOOK_SECRET`, then register the public Server `/api/payments/webhook` for `checkout.session.completed`, `checkout.session.async_payment_succeeded` and `checkout.session.expired`. Keep all values in the provider environment.
 
+### Startup failures in Render
+
+Open the failed deploy's **Logs** and find the JSON entry whose message is `SalonBook API failed to start.` Read `step`, `error.name`, `error.message`, `error.code` and `causes`. The stack contains code locations. Startup keeps a nonzero exit status on failure and binds the port only after database and auth initialization succeed.
+
+| Step or code | Check |
+| --- | --- |
+| `environment.validate` or `auth.validate` | Correct the named environment variable. Use the public Client HTTPS origin for `BETTER_AUTH_URL` and `CLIENT_URL`. Include that exact origin without a trailing slash in the comma-separated `ALLOWED_ORIGINS`. |
+| `mongodb.configure` or `mongodb.connect` | Check Render's `MONGODB_URI` and database name. `MONGODB_DB_NAME` overrides the database name in the URI. Use a transaction-capable Atlas connection and leave TLS verification enabled. For DNS or TLS errors, use the nested code and check the Atlas cluster state, Render outbound IP allowlist and certificate path. Error code 18 indicates authentication failure. |
+| `mongodb.indexes.<collection>`, code 13 | Check that the application database user can create collections and indexes and read/write documents on the selected database. A database-scoped `readWrite` role supplies these actions. An Atlas UI project role is separate from a database user role. |
+| `mongodb.indexes.<collection>`, codes 11000, 85 or 86 | Inspect existing data and index definitions on the named collection. These indicate a duplicate key or a conflicting index definition. Resolve through a reviewed data/index migration. |
+| `http.listen` | Check Render's `PORT` and whether another process owns it. |
+
+See [Atlas database users](https://www.mongodb.com/docs/atlas/security-add-mongodb-users/) and [Render's Atlas connection guide](https://render.com/docs/connect-to-mongodb-atlas).
+
 ## Deploy and verify the Client
 
 Set the Vercel project's `SALONBOOK_API_URL` to the actual public Express HTTPS URL ending in `/api` and redeploy the Client completion branch to its staging origin. The production build now rejects an absent or loopback API URL. Check Server readiness directly and through the Vercel rewrite before verifying the catalogue. Then run the end-to-end customer and admin journey on desktop, tablet and mobile, including a duplicate booking race and a Stripe test payment. Confirm dashboard records, image upload, Google callback, secure cookies, reload behavior and unauthorized access. Use production only after this staging run passes.

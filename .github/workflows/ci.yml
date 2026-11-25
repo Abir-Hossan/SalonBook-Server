@@ -1,0 +1,33 @@
+name: Server checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      SALONBOOK_PHASE03_LOCAL_TEST_URI: mongodb://127.0.0.1:27017/?replicaSet=salonbook-ci
+      SALONBOOK_AUTH_TEST_URI: mongodb://127.0.0.1:27017/?replicaSet=salonbook-ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run build
+      - name: Start disposable MongoDB replica set
+        run: |
+          docker run --detach --name salonbook-mongo -p 127.0.0.1:27017:27017 mongo:8.0 --replSet salonbook-ci --bind_ip_all
+          for attempt in $(seq 1 30); do
+            if docker exec salonbook-mongo mongosh --quiet --eval 'rs.initiate({_id: "salonbook-ci", members: [{_id: 0, host: "127.0.0.1:27017"}]})'; then break; fi
+            sleep 2
+          done
+          for attempt in $(seq 1 30); do
+            if docker exec salonbook-mongo mongosh --quiet --eval 'quit(db.hello().isWritablePrimary ? 0 : 1)'; then exit 0; fi
+            sleep 2
+          done
+          exit 1
+      - run: npm test

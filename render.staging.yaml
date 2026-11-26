@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: salonbook-api-staging
+    runtime: node
+    region: singapore
+    branch: staging/admin-verification
+    plan: free
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/ready
+    autoDeployTrigger: off
+    envVars:
+      - key: NODE_VERSION
+        value: 24.22.3
+      - key: NODE_ENV
+        value: production
+      - key: SALONBOOK_DEPLOYMENT
+        value: staging
+      - key: MONGODB_URI
+        sync: false
+      - key: SALONBOOK_STAGING_MONGODB_HOST
+        sync: false
+      - key: MONGODB_DB_NAME
+        value: salonbook_staging
+      - key: BETTER_AUTH_SECRET
+        generateValue: true
+      - key: CLIENT_URL
+        value: https://salonbook-client-git-completion-assignment-r-82c2f1-abir-hossan.vercel.app
+      - key: BETTER_AUTH_URL
+        value: https://salonbook-client-git-completion-assignment-r-82c2f1-abir-hossan.vercel.app
+      - key: ALLOWED_ORIGINS
+        value: https://salonbook-client-git-completion-assignment-r-82c2f1-abir-hossan.vercel.app

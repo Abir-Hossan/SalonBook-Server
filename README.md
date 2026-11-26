@@ -21,6 +21,8 @@ For current requirements, deployment steps and verification, see [PROJECT_STATUS
 
 ### Authorize a specific Vercel Preview
 
+For approval, deployment, and Admin acceptance, use the [isolated staging runbook](docs/staging-admin.md) and separate `render.staging.yaml`.
+
 `ALLOWED_ORIGINS` is a comma-separated list of exact browser origins. The Server uses it for credentialed CORS, authenticated write-origin checks, and Better Auth's trusted origins. Enter only the scheme and host plus a nondefault port if applicable. Production-mode services require HTTPS. Leave out paths, trailing slashes, and wildcards.
 
 For full Preview authentication, point Vercel's **Preview** `SALONBOOK_API_URL` at a dedicated HTTPS staging API ending in `/api`. Use a separate database and Better Auth secret, and configure the staging Server with the exact stable Preview origin:

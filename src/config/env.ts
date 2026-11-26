@@ -1,11 +1,14 @@
 import dotenv from 'dotenv';
 import { z } from 'zod';
 import { parseAllowedOrigins } from './allowed-origins';
+import { validateStagingConfig } from './staging';
 
 dotenv.config();
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  SALONBOOK_DEPLOYMENT: z.literal('staging').optional(),
+  SALONBOOK_STAGING_MONGODB_HOST: z.string().trim().optional(),
   PORT: z.coerce.number().int().min(1).max(65535).default(5000),
   SEED_DEMO_CATALOG: z.enum(['true', 'false']).default('false'),
   MONGODB_URI: z.string().trim().optional(),
@@ -33,7 +36,9 @@ if (!parsed.success) {
   throw new Error(`Invalid environment configuration: ${issues}`);
 }
 
-export const env = Object.freeze({
-  ...parsed.data,
-  allowedOrigins: parseAllowedOrigins(parsed.data.ALLOWED_ORIGINS, parsed.data.NODE_ENV === 'production')
-});
+const allowedOrigins = parseAllowedOrigins(parsed.data.ALLOWED_ORIGINS, parsed.data.NODE_ENV === 'production');
+if (parsed.data.SALONBOOK_DEPLOYMENT === 'staging') {
+  validateStagingConfig({ ...parsed.data, NODE_TLS_REJECT_UNAUTHORIZED: process.env.NODE_TLS_REJECT_UNAUTHORIZED }, allowedOrigins);
+}
+
+export const env = Object.freeze({ ...parsed.data, allowedOrigins });

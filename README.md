@@ -19,6 +19,23 @@ Create a local .env from .env.example only if .env does not already exist. Confi
 
 For current requirements, deployment steps and verification, see [PROJECT_STATUS.md](PROJECT_STATUS.md).
 
+### Authorize a specific Vercel Preview
+
+`ALLOWED_ORIGINS` is a comma-separated list of exact browser origins. The Server uses it for credentialed CORS, authenticated write-origin checks, and Better Auth's trusted origins. Enter only the scheme and host plus a nondefault port if applicable. Production-mode services require HTTPS. Leave out paths, trailing slashes, and wildcards.
+
+For full Preview authentication, point Vercel's **Preview** `SALONBOOK_API_URL` at a dedicated HTTPS staging API ending in `/api`. Use a separate database and Better Auth secret, and configure the staging Server with the exact stable Preview origin:
+
+```dotenv
+NODE_ENV=production
+CLIENT_URL=https://salonbook-client-git-completion-assignment-r-82c2f1-abir-hossan.vercel.app
+BETTER_AUTH_URL=https://salonbook-client-git-completion-assignment-r-82c2f1-abir-hossan.vercel.app
+ALLOWED_ORIGINS=https://salonbook-client-git-completion-assignment-r-82c2f1-abir-hossan.vercel.app
+```
+
+If an operator intentionally authorizes the reviewed Preview to use the shared API and its production data, append the exact Preview origin to that Server's existing `ALLOWED_ORIGINS` value. Preserve existing trusted entries and keep production `CLIENT_URL` and `BETTER_AUTH_URL` on the production Client. Only trust Preview deployments whose code is approved for production data access.
+
+On Render, apply the environment change to the **API service the Preview actually uses**, then deploy and wait for `/api/ready`. If the Vercel Preview API target changes, redeploy the Client Preview. A successful preflight returns `204` and echoes the exact origin with credentials allowed. Verify email sign-in and `/salon-api/auth/me` using a dedicated test account in the protected Preview. OAuth callbacks also need their provider-specific staging configuration when tested.
+
 ## Scripts
 
 - `npm run dev` — tsx watch server

@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import { z } from 'zod';
+import { parseAllowedOrigins } from './allowed-origins';
 
 dotenv.config();
 
@@ -34,5 +35,5 @@ if (!parsed.success) {
 
 export const env = Object.freeze({
   ...parsed.data,
-  allowedOrigins: [...new Set(parsed.data.ALLOWED_ORIGINS.split(',').map((value) => value.trim()).filter(Boolean))]
+  allowedOrigins: parseAllowedOrigins(parsed.data.ALLOWED_ORIGINS, parsed.data.NODE_ENV === 'production')
 });

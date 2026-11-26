@@ -15,7 +15,7 @@ const cookie = 'salonbook_google';
 const cookieOptions = { httpOnly: true, sameSite: 'lax' as const, secure: env.NODE_ENV === 'production', path: '/salon-api/auth/google/callback' };
 
 export function googleRoutes(router: Router, issueSession: (req: Request, res: Response, id: Types.ObjectId, remember: boolean) => Promise<void>) {
-  router.get('/providers', (_req, res) => success(res, 'Authentication providers.', { google: configured }));
+  router.get('/providers', (_req, res) => success(res, 'Authentication providers.', { google: configured, portraitUpload: Boolean(env.IMGBB_API_KEY) }));
   router.get('/google', (req, res, next) => {
     if (!configured) { next(new AppError(503, 'Google sign-in is unavailable.', 'OAUTH_UNAVAILABLE')); return; }
     const state = randomBytes(24).toString('hex');

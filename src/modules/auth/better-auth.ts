@@ -6,6 +6,7 @@ import { UserModel } from '../../database/models/user.model';
 import { AppError } from '../../utils/errors';
 import { startupStep } from '../../utils/startup-error';
 import { verifyLegacyPassword } from './legacy-password';
+import { registrationPassword } from './registration-password';
 
 export const betterAuthPath = '/api/better-auth';
 const accountCollection = 'BetterAuthAccounts';
@@ -26,7 +27,7 @@ function isTrustedRedirect(value: string, origin: string): boolean {
 
 const signUpDetails = z.object({
   name: z.string().trim().min(2).max(120),
-  password: z.string().min(8).max(128).regex(/[a-z]/).regex(/[A-Z]/),
+  password: registrationPassword,
   acceptedTerms: z.literal(true),
 });
 

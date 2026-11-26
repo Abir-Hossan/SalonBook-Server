@@ -25,7 +25,7 @@ const localUri = process.env.SALONBOOK_AUTH_TEST_URI;
 const atlasUri = process.env.SALONBOOK_AUTH_ATLAS_TEST_URI;
 const qa = createQaDatabase('salonbook_auth_qa');
 const origin = env.allowedOrigins[0] ?? env.CLIENT_URL;
-const password = 'DemoPassword12';
+const password = 'DemoPassword12!';
 const patron = (key: string) => ({ name: 'Test Patron', email: key + '@example.test', password, acceptedTerms: true });
 const salt = '0123456789abcdef0123456789abcdef';
 const legacyHash = salt + ':' + scryptSync(password, salt, 64).toString('hex');
@@ -65,6 +65,16 @@ describe.skipIf(!localUri && !atlasUri)('Better Auth with disposable MongoDB (' 
     const duplicate = await signUp(agent, 'new').expect(409);
     expect(duplicate.body.errors[0].code).toBe('EMAIL_CONFLICT');
     await agent.post('/api/auth/register').set('Origin', origin).send({ ...patron('forged'), role: 'admin' }).expect(400);
+  });
+
+  it('requires a digit and a symbol on both registration routes', async () => {
+    const agent = request.agent(app());
+    for (const path of ['/api/auth/register', '/api/better-auth/sign-up/email']) {
+      for (const weakPassword of ['MissingNumber!', 'MissingSymbol12']) {
+        await agent.post(path).set('Origin', origin).send({ ...patron('weak'), password: weakPassword }).expect(400);
+      }
+    }
+    expect(await UserModel.exists({ email: patron('weak').email })).toBeNull();
   });
 
   it('logs in, rejects bad credentials and revokes the cookie on logout', async () => {

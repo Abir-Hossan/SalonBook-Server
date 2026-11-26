@@ -12,6 +12,7 @@ import { AppError } from '../../utils/errors';
 import { googleRoutes } from './google.routes';
 import { success } from '../../utils/http';
 import { getBetterAuth } from './better-auth';
+import { registrationPassword } from './registration-password';
 
 const cookieName = 'salonbook_session';
 const cookieSettings = { httpOnly: true, sameSite: 'lax' as const, secure: env.NODE_ENV === 'production', path: '/' };
@@ -27,7 +28,7 @@ const email = z.string().trim().email().max(254).transform((value) => value.toLo
 const credentials = z.object({ email, password: z.string().min(1).max(128), remember: z.boolean().optional() }).strict();
 const registration = credentials.extend({
   name: z.string().trim().min(2).max(120),
-  password: z.string().min(8).max(128).regex(/[a-z]/).regex(/[A-Z]/),
+  password: registrationPassword,
   acceptedTerms: z.literal(true),
 }).strict();
 

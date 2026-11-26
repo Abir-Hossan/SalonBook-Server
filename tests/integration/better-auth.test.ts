@@ -196,8 +196,8 @@ describe.skipIf(!localUri && !atlasUri)('Better Auth with disposable MongoDB (' 
       timeSlot: '01:00 PM', servicePrice: 165, status: 'pending', paymentStatus: 'unpaid',
     });
     const appointmentId = String(booking._id);
-    const checkout = (agent: typeof owner) =>
-      agent.post('/api/payments/checkout').set('Origin', origin).send({ appointmentId });
+    const checkout = (agent: typeof owner, id = appointmentId) =>
+      agent.post('/api/payments/checkout').set('Origin', origin).send({ appointmentId: id });
     const sessionId = 'cs_test_release_verification';
     const checkoutUrl = 'https://checkout.stripe.com/c/pay/' + sessionId;
     let attempt = '';
@@ -225,7 +225,13 @@ describe.skipIf(!localUri && !atlasUri)('Better Auth with disposable MongoDB (' 
     vi.stubGlobal('fetch', provider);
     try {
       await checkout(owner).expect(422);
-      await AppointmentModel.updateOne({ _id: booking._id }, { $set: { status: 'confirmed' } });
+      await checkout(owner, 'invalid-appointment').expect(400);
+      await checkout(owner, String(new mongoose.Types.ObjectId())).expect(422);
+      await AppointmentModel.updateOne({ _id: booking._id }, { $set: { status: 'cancelled' } });
+      await checkout(owner).expect(422);
+      await AppointmentModel.updateOne({ _id: booking._id }, { $set: { status: 'confirmed', paymentStatus: 'paid' } });
+      await checkout(owner).expect(422);
+      await AppointmentModel.updateOne({ _id: booking._id }, { $set: { paymentStatus: 'unpaid' } });
       await checkout(other).expect(422);
       expect(provider).toHaveBeenCalledTimes(0);
 

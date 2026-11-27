@@ -29,7 +29,7 @@ displayed estimated total is above USD 0, stop for a new review.
    SRV URI in `MONGODB_URI`. Use private deployment settings for the URI.
    Allowlist the required Render outbound ranges in the staging Atlas project.
    Keep the generated Better Auth secret separate. The Server refuses startup
-   in staging if Google or ImgBB credentials are set or TLS verification
+   in staging if ImgBB credentials are set or TLS verification
    is disabled.
 3. After the staging service reports `ready` at `/api/ready`, set
    `SALONBOOK_API_URL` for the Vercel **Preview** branch only, to the staging
@@ -49,6 +49,20 @@ displayed estimated total is above USD 0, stop for a new review.
 The startup checks compare the URI with the staging database and the configured
 staging hostname. Cluster isolation and scoped Atlas privileges are the controls
 that prevent staging credentials from writing production data.
+
+## Google sign-in
+
+Create a Web application OAuth client for staging in Google Auth Platform.
+Register the exact Preview callback as an authorized redirect URI:
+
+`https://salonbook-client-git-completion-assignment-r-82c2f1-abir-hossan.vercel.app/api/better-auth/callback/google`
+
+Use a Google test audience for staging. Add the client credentials together as
+`GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` on the Render staging service.
+Leave both unset to disable Google sign-in. In a browser with access to the
+protected Preview, test Google sign-in with an authorized Gmail account, then
+sign out and sign in again. The Google identity should return to the same
+staging account with the customer role.
 
 ## Stripe Sandbox checkout
 

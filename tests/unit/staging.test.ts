@@ -17,6 +17,12 @@ describe('isolated staging configuration', () => {
     expect(() => validateStagingConfig(config, [origin])).not.toThrow();
   });
 
+  it('accepts a Google OAuth client and secret together', () => {
+    expect(() => validateStagingConfig({
+      ...config, GOOGLE_CLIENT_ID: 'fixture.apps.googleusercontent.com', GOOGLE_CLIENT_SECRET: 'fixture-secret',
+    }, [origin])).not.toThrow();
+  });
+
   it.each(['sk_test_fixture', 'rk_test_fixture'])('accepts a Stripe sandbox key and signing secret (%s)', (key) => {
     expect(() => validateStagingConfig({
       ...config, STRIPE_SECRET_KEY: key, STRIPE_WEBHOOK_SECRET: 'whsec_fixture',
@@ -33,6 +39,7 @@ describe('isolated staging configuration', () => {
     { MONGODB_URI: config.MONGODB_URI + '&tlsAllowInvalidCertificates=true' },
     { MONGODB_URI: config.MONGODB_URI + '&retryWrites=true' },
     { NODE_TLS_REJECT_UNAUTHORIZED: '0' },
+    { GOOGLE_CLIENT_ID: 'fixture.apps.googleusercontent.com' },
     { GOOGLE_CLIENT_SECRET: 'fixture-secret' },
     { STRIPE_SECRET_KEY: 'fixture-secret' },
     { STRIPE_SECRET_KEY: 'sk_live_fixture', STRIPE_WEBHOOK_SECRET: 'whsec_fixture' },

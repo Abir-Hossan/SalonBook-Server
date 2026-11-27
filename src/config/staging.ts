@@ -28,8 +28,11 @@ export function validateStagingConfig(config: StagingConfig, origins: string[]) 
   if (config.NODE_TLS_REJECT_UNAUTHORIZED === '0') {
     throw new Error('Staging requires TLS certificate verification.');
   }
-  if ([config.GOOGLE_CLIENT_ID, config.GOOGLE_CLIENT_SECRET, config.IMGBB_API_KEY].some(Boolean)) {
-    throw new Error('Staging requires Google and ImgBB credentials to be unset.');
+  if (config.IMGBB_API_KEY) {
+    throw new Error('Staging requires ImgBB credentials to be unset.');
+  }
+  if (Boolean(config.GOOGLE_CLIENT_ID) !== Boolean(config.GOOGLE_CLIENT_SECRET)) {
+    throw new Error('Staging Google sign-in requires a client ID and secret together.');
   }
   const { STRIPE_SECRET_KEY: stripeKey, STRIPE_WEBHOOK_SECRET: webhookSecret } = config;
   if ((stripeKey || webhookSecret) &&

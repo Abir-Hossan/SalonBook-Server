@@ -14,6 +14,8 @@ const envSchema = z.object({
   BETTER_AUTH_URL: z.string().url().optional(),
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
+  SALONBOOK_DEPLOYMENT: z.string().optional(),
+  STRIPE_MODE: z.enum(['test', 'live']).default('test'),
   STRIPE_SECRET_KEY: z.string().optional(),
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
   IMGBB_API_KEY: z.string().optional(),

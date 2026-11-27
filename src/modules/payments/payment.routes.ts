@@ -11,8 +11,10 @@ import { mongoPrincipalResolver } from '../auth/auth.routes';
 import { asyncHandler } from '../../utils/async-handler';
 import { AppError } from '../../utils/errors';
 import { success } from '../../utils/http';
+import { stripePaymentsEnabled } from './stripe-config';
 
 const idSchema = z.string().regex(/^[a-f0-9]{24}$/i);
+const stripeApiVersion = '2026-11-18.endive';
 const sessionSchema = z.object({
   id: z.string().startsWith('cs_'),
   url: z.string().url().nullish(),
@@ -21,11 +23,11 @@ const sessionSchema = z.object({
   amount_total: z.number().int(),
   currency: z.string(),
   metadata: z.object({ appointmentId: idSchema, attempt: z.string().uuid() }),
-  livemode: z.literal(false),
+  livemode: z.literal(env.STRIPE_MODE === 'live'),
 });
 
 function isConfigured() {
-  return /^(?:sk|rk)_test_/.test(env.STRIPE_SECRET_KEY ?? '') && /^whsec_/.test(env.STRIPE_WEBHOOK_SECRET ?? '');
+  return stripePaymentsEnabled(env);
 }
 
 function configured() {
@@ -44,7 +46,7 @@ async function stripe(path: string, init: RequestInit = {}) {
   configured();
   const response = await fetch('https://api.stripe.com/v1/checkout/sessions' + path, {
     ...init, signal: AbortSignal.timeout(12_000),
-    headers: { ...init.headers, Authorization: 'Bearer ' + env.STRIPE_SECRET_KEY },
+    headers: { ...init.headers, Authorization: 'Bearer ' + env.STRIPE_SECRET_KEY, 'Stripe-Version': stripeApiVersion },
   });
   if (!response.ok) throw new StripeRequestError(response.status);
   return sessionSchema.parse(await response.json());
@@ -91,7 +93,7 @@ export const stripeWebhook = [
     if (['checkout.session.completed', 'checkout.session.async_payment_succeeded', 'checkout.session.expired'].includes(event.type)) {
       const checkout = sessionSchema.safeParse(event.data.object);
       if (!checkout.success) {
-        logger.warn({ eventType: event.type }, 'Rejected a Stripe test event with an invalid checkout payload');
+        logger.warn({ eventType: event.type }, 'Rejected a Stripe event with an invalid checkout payload or mode');
         throw new AppError(400, 'Invalid checkout notification data.', 'INVALID_STRIPE_EVENT');
       }
       await recordPayment(checkout.data);
@@ -149,7 +151,7 @@ export function paymentRoutes() {
         throw new AppError(409, 'The previous checkout needs to be reconciled. Contact the concierge.', 'CHECKOUT_RECONCILIATION_REQUIRED');
       }
       const params = new URLSearchParams({
-        mode: 'payment', 'payment_method_types[0]': 'card',
+        mode: 'payment', 'allowed_payment_method_types[0]': 'card',
         success_url: new URL('/payment/success?appointment=' + bookingId, redirectBase).href,
         cancel_url: new URL('/payment/cancel', redirectBase).href,
         'metadata[appointmentId]': bookingId, 'metadata[attempt]': booking.checkoutAttempt,

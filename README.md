@@ -9,7 +9,7 @@ SalonBook Server is the Express and TypeScript API for the [SalonBook Client](ht
 | Catalogue | Public services, categories, search, pagination, and admin service management |
 | Appointments | Available time slots, booking requests, overlap protection, confirmation, and cancellation |
 | Accounts | Email and password, optional Google sign-in, customer profiles, and admin account controls |
-| Payments | Stripe test-mode Checkout for confirmed, unpaid bookings and signed webhooks that record payments and update bookings |
+| Payments | Stripe Checkout for confirmed, unpaid bookings and signed webhooks that record payments and update bookings |
 
 ## Local setup
 
@@ -37,7 +37,7 @@ Check [API health](http://localhost:5000/api/health) and [database/auth readines
 | `CLIENT_URL`, `ALLOWED_ORIGINS` | Client redirects and exact allowed browser origins |
 | `BETTER_AUTH_URL`, `BETTER_AUTH_SECRET` | Auth origin and session signing secret |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Optional Google OAuth Web application credentials |
-| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Optional Stripe test API key and webhook signing secret |
+| `STRIPE_MODE`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Optional payment mode (`test` by default), matching API key, and destination signing secret |
 | `IMGBB_API_KEY` | Optional service and profile image uploads |
 | `PORT`, `SALON_TIME_ZONE` | HTTP port and time zone used for booking dates |
 
@@ -57,6 +57,8 @@ The GitHub Actions workflow runs the integration tests with a disposable MongoDB
 Render builds the API with `npm run build` and starts it with `npm start`. Use `/api/ready` for health checks. Set the production `CLIENT_URL` and `BETTER_AUTH_URL` to the exact public HTTPS Client origin and include that origin in `ALLOWED_ORIGINS`. The Vercel Client proxies API requests to `SALONBOOK_API_URL`. Use a separate database and auth secret for Preview verification.
 
 For Google sign-in through Better Auth, register `/api/better-auth/callback/google` on the public Client origin in your OAuth Web application. For Stripe Sandbox, send Checkout events to `/api/payments/webhook` on the API origin. Consult the [isolated staging runbook](https://github.com/Abir-Hossan/SalonBook-Server/blob/staging/admin-verification/docs/staging-admin.md) for the staging environment.
+
+To accept real card payments, activate the Stripe account, create a live-mode destination at the API's `/api/payments/webhook` endpoint, and subscribe to `checkout.session.completed`, `checkout.session.async_payment_succeeded`, and `checkout.session.expired`. Select snapshot events with API version `2026-11-18.endive`. Set `STRIPE_MODE=live`, the live API key, and the destination's live signing secret together on the Production API service. Use the Stripe Sandbox credentials for staging.
 
 ## Reference
 

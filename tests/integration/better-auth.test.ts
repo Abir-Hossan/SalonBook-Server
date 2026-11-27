@@ -216,6 +216,9 @@ describe.skipIf(!localUri && !atlasUri)('Better Auth with disposable MongoDB (' 
       if (options?.method === 'POST') {
         expect(target).toBe('https://api.stripe.com/v1/checkout/sessions');
         const params = options.body as URLSearchParams;
+        expect(new Headers(options.headers).get('Stripe-Version')).toBe('2026-11-18.endive');
+        expect(params.get('allowed_payment_method_types[0]')).toBe('card');
+        expect(params.has('payment_method_types[0]')).toBe(false);
         const submitted = params.get('metadata[attempt]')!;
         expect(new Headers(options.headers).get('Idempotency-Key')).toBe(submitted);
         expect(params.get('line_items[0][price_data][unit_amount]')).toBe('16500');

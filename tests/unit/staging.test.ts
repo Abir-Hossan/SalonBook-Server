@@ -17,6 +17,12 @@ describe('isolated staging configuration', () => {
     expect(() => validateStagingConfig(config, [origin])).not.toThrow();
   });
 
+  it.each(['sk_test_fixture', 'rk_test_fixture'])('accepts a Stripe sandbox key and signing secret (%s)', (key) => {
+    expect(() => validateStagingConfig({
+      ...config, STRIPE_SECRET_KEY: key, STRIPE_WEBHOOK_SECRET: 'whsec_fixture',
+    }, [origin])).not.toThrow();
+  });
+
   it.each([
     { NODE_ENV: 'development' },
     { MONGODB_DB_NAME: 'salonbook' },
@@ -29,6 +35,11 @@ describe('isolated staging configuration', () => {
     { NODE_TLS_REJECT_UNAUTHORIZED: '0' },
     { GOOGLE_CLIENT_SECRET: 'fixture-secret' },
     { STRIPE_SECRET_KEY: 'fixture-secret' },
+    { STRIPE_SECRET_KEY: 'sk_live_fixture', STRIPE_WEBHOOK_SECRET: 'whsec_fixture' },
+    { STRIPE_SECRET_KEY: 'rk_live_fixture', STRIPE_WEBHOOK_SECRET: 'whsec_fixture' },
+    { STRIPE_SECRET_KEY: 'sk_test_fixture' },
+    { STRIPE_WEBHOOK_SECRET: 'whsec_fixture' },
+    { STRIPE_SECRET_KEY: 'sk_test_fixture', STRIPE_WEBHOOK_SECRET: 'invalid_fixture' },
     { IMGBB_API_KEY: 'fixture-secret' },
     { BETTER_AUTH_URL: 'https://production.example.test' },
   ])('rejects unsafe or mismatched staging settings (%j)', (override) => {

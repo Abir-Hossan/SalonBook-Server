@@ -28,9 +28,13 @@ export function validateStagingConfig(config: StagingConfig, origins: string[]) 
   if (config.NODE_TLS_REJECT_UNAUTHORIZED === '0') {
     throw new Error('Staging requires TLS certificate verification.');
   }
-  if ([config.GOOGLE_CLIENT_ID, config.GOOGLE_CLIENT_SECRET, config.STRIPE_SECRET_KEY,
-    config.STRIPE_WEBHOOK_SECRET, config.IMGBB_API_KEY].some(Boolean)) {
-    throw new Error('Staging Admin verification requires Google, Stripe and ImgBB credentials to be unset.');
+  if ([config.GOOGLE_CLIENT_ID, config.GOOGLE_CLIENT_SECRET, config.IMGBB_API_KEY].some(Boolean)) {
+    throw new Error('Staging requires Google and ImgBB credentials to be unset.');
+  }
+  const { STRIPE_SECRET_KEY: stripeKey, STRIPE_WEBHOOK_SECRET: webhookSecret } = config;
+  if ((stripeKey || webhookSecret) &&
+      (!/^(?:sk|rk)_test_\S+$/.test(stripeKey ?? '') || !/^whsec_\S+$/.test(webhookSecret ?? ''))) {
+    throw new Error('Staging Stripe Checkout requires a test API key and webhook signing secret together.');
   }
   const host = config.SALONBOOK_STAGING_MONGODB_HOST;
   if (config.MONGODB_DB_NAME !== database || !host || !atlasHost.test(host)) {

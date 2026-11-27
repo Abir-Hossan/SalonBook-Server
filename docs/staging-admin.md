@@ -29,7 +29,7 @@ displayed estimated total is above USD 0, stop for a new review.
    SRV URI in `MONGODB_URI`. Use private deployment settings for the URI.
    Allowlist the required Render outbound ranges in the staging Atlas project.
    Keep the generated Better Auth secret separate. The Server refuses startup
-   in staging if Google, Stripe or ImgBB credentials are set or TLS verification
+   in staging if Google or ImgBB credentials are set or TLS verification
    is disabled.
 3. After the staging service reports `ready` at `/api/ready`, set
    `SALONBOOK_API_URL` for the Vercel **Preview** branch only, to the staging
@@ -49,3 +49,17 @@ displayed estimated total is above USD 0, stop for a new review.
 The startup checks compare the URI with the staging database and the configured
 staging hostname. Cluster isolation and scoped Atlas privileges are the controls
 that prevent staging credentials from writing production data.
+
+## Stripe Sandbox checkout
+
+To enable Checkout, add both `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` to
+the existing Render staging service in one update. Use a test secret or
+restricted API key from the Stripe Sandbox and the signing secret for that
+Sandbox's webhook destination at
+`https://salonbook-api-staging.onrender.com/api/payments/webhook`. Subscribe to
+`checkout.session.completed`, `checkout.session.async_payment_succeeded`, and
+`checkout.session.expired`. With both settings unset, online payments are disabled.
+
+In the protected Preview, sign in as a staging Customer and pay for a confirmed,
+unpaid test appointment using a Stripe test card. Verify the appointment becomes
+paid after webhook delivery and the transaction appears in Admin Transactions.

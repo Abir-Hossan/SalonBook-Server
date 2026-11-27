@@ -54,6 +54,87 @@ paths:
       responses:
         '204': { description: Deleted }
         '409': { description: Historical appointments exist }
+  /ready:
+    get:
+      summary: Check API readiness
+      responses:
+        '200':
+          description: MongoDB and Better Auth are ready
+        '503':
+          description: Required services are unavailable
+  /appointments/availability:
+    get:
+      summary: List available start times for an active service on a salon date
+      parameters:
+        - in: query
+          name: serviceId
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: date
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Salon date, minimum bookable date, timezone and available start times
+        '404':
+          description: Active service was not found
+        '422':
+          description: Appointment date is invalid
+  /payments/availability:
+    get:
+      summary: Read Stripe test-mode availability for the current customer
+      responses:
+        '200':
+          description: Provider availability
+        '401':
+          description: Customer session required
+  /payments/checkout:
+    post:
+      summary: Open Stripe test Checkout for a confirmed unpaid owned appointment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [appointmentId]
+              properties:
+                appointmentId:
+                  type: string
+      responses:
+        '200':
+          description: Stripe Checkout URL
+        '422':
+          description: Appointment is ineligible
+        '503':
+          description: Test-mode checkout is unconfigured
+  /payments/release-checkout:
+    post:
+      summary: Admin-only expiry of a recorded unpaid Stripe test checkout
+      responses:
+        '200':
+          description: Checkout released
+        '403':
+          description: Administrator role required
+        '409':
+          description: Provider review required
+  /payments/webhook:
+    post:
+      summary: Process a signed Stripe test-mode event
+      parameters:
+        - in: header
+          name: Stripe-Signature
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Event acknowledged
+        '400':
+          description: Invalid signature or event
   /appointments:
     post:
       summary: Request appointment (customer; Phase 04 auth pending)

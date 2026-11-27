@@ -12,6 +12,7 @@ import { AppError } from '../../utils/errors';
 import { googleRoutes } from './google.routes';
 import { success } from '../../utils/http';
 import { getBetterAuth } from './better-auth';
+import { registrationPassword } from './registration-password';
 
 const cookieName = 'salonbook_session';
 const cookieSettings = { httpOnly: true, sameSite: 'lax' as const, secure: env.NODE_ENV === 'production', path: '/' };
@@ -27,7 +28,7 @@ const email = z.string().trim().email().max(254).transform((value) => value.toLo
 const credentials = z.object({ email, password: z.string().min(1).max(128), remember: z.boolean().optional() }).strict();
 const registration = credentials.extend({
   name: z.string().trim().min(2).max(120),
-  password: z.string().min(8).max(128).regex(/[a-z]/).regex(/[A-Z]/),
+  password: registrationPassword,
   acceptedTerms: z.literal(true),
 }).strict();
 
@@ -47,6 +48,12 @@ async function issueSession(req: Request, res: Response, userId: Types.ObjectId,
 
 export const mongoPrincipalResolver: PrincipalResolver = async (req) => {
   const auth = getBetterAuth();
+  const bearer = /^Bearer ([A-Za-z0-9_.-]+)$/i.exec(req.get('authorization') ?? '')?.[1];
+  if (auth && bearer) {
+    const id = await auth.verifyAccessToken(bearer);
+    const user = id ? await UserModel.findById(id).lean() : null;
+    return user ? { id: String(user._id), role: user.role, isBlocked: user.isBlocked, email: user.email } : null;
+  }
   if (auth) {
     const session = await auth.api.getSession({ headers: auth.headers(req.headers), query: { disableRefresh: true } });
     if (session) {

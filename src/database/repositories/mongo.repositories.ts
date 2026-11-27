@@ -4,6 +4,7 @@ import { ServiceModel, type ServiceRecord } from '../models/service.model';
 import { TransactionModel, type TransactionRecord } from '../models/transaction.model';
 import { UserModel, type UserRecord } from '../models/user.model';
 import { AppError } from '../../utils/errors';
+import { reservationKeys } from '../../modules/appointments/schedule';
 import type { Appointment, PageResult, Service, Transaction, User } from '../../types/domain';
 import type { AppointmentFilters, AppointmentRepository, ServiceFilters, ServiceRepository, TransactionFilters, TransactionRepository, UserFilters, UserRepository } from '../../interfaces/repositories';
 
@@ -13,7 +14,7 @@ const asDate = (value: Date | undefined): string => (value ?? new Date()).toISOS
 const pageResult = <T>(items: T[], page: number, limit: number, total: number): PageResult<T> => ({ items, meta: { page, limit, total, totalPages: Math.ceil(total / limit) } });
 const serviceDto = (d: ServiceRecord): Service => ({ id: idOf(d._id), serviceName: d.serviceName, category: d.category, description: d.description, price: d.price, duration: d.duration, image: d.image, status: d.status, createdAt: asDate(d.createdAt) });
 const userDto = (d: UserRecord): User => ({ id: idOf(d._id), name: d.name, email: d.email, ...(d.image ? { image: d.image } : {}), role: d.role, isBlocked: d.isBlocked, createdAt: asDate(d.createdAt) });
-const appointmentDto = (d: AppointmentRecord): Appointment => ({ id: idOf(d._id), serviceId: idOf(d.serviceId), customerId: idOf(d.customerId), appointmentDate: d.appointmentDate, timeSlot: d.timeSlot, ...(d.message ? { message: d.message } : {}), servicePrice: d.servicePrice, paymentStatus: d.paymentStatus, status: d.status, createdAt: asDate(d.createdAt) });
+const appointmentDto = (d: AppointmentRecord): Appointment => ({ id: idOf(d._id), serviceId: idOf(d.serviceId), customerId: idOf(d.customerId), appointmentDate: d.appointmentDate, timeSlot: d.timeSlot, ...(d.message ? { message: d.message } : {}), servicePrice: d.servicePrice, serviceDuration: d.serviceDuration, serviceName: d.serviceName, serviceImage: d.serviceImage, checkoutPending: Boolean(d.checkoutAttempt && d.paymentStatus === 'unpaid'), paymentStatus: d.paymentStatus, status: d.status, createdAt: asDate(d.createdAt) });
 const transactionDto = (d: TransactionRecord): Transaction => ({ id: idOf(d._id), appointmentId: idOf(d.appointmentId), customerId: idOf(d.customerId), amount: d.amount, currency: d.currency, ...(d.stripeSessionId ? { stripeSessionId: d.stripeSessionId } : {}), status: d.status, createdAt: asDate(d.createdAt) });
 
 export class MongoServiceRepository implements ServiceRepository {
@@ -50,11 +51,22 @@ if (f.sort === 'price_asc') {
 export class MongoAppointmentRepository implements AppointmentRepository {
   async list(f: AppointmentFilters): Promise<PageResult<Appointment>> {
     const q: FilterQuery<AppointmentRecord> = {};
-    if (f.customerId && validId(f.customerId)) q.customerId = new mongoose.Types.ObjectId(f.customerId);
-    if (f.status) q.status = f.status;
+    if (f.customerId !== undefined) {
+      if (!validId(f.customerId)) return pageResult([], f.page, f.limit, 0);
+      q.customerId = new mongoose.Types.ObjectId(f.customerId);
+    }
+    if (f.upcoming) q.status = { $ne: 'cancelled' };
+    else if (f.status) q.status = f.status;
     if (f.paymentStatus) q.paymentStatus = f.paymentStatus;
     if (f.dateFrom || f.dateTo) q.appointmentDate = { ...(f.dateFrom ? { $gte: f.dateFrom } : {}), ...(f.dateTo ? { $lte: f.dateTo } : {}) };
-    const [docs, total] = await Promise.all([AppointmentModel.find(q).sort({ createdAt: -1 }).skip((f.page - 1) * f.limit).limit(f.limit).lean().exec(), AppointmentModel.countDocuments(q).exec()]);
+    if (f.q) {
+      const pattern = new RegExp(escapeRegex(f.q), 'i');
+      const serviceIds = await ServiceModel.distinct('_id', { serviceName: pattern });
+      q.$or = [{ serviceName: pattern }, { serviceId: { $in: serviceIds } }, { appointmentDate: pattern }, { timeSlot: pattern }, { status: pattern }];
+      if (validId(f.q)) q.$or.push({ _id: f.q });
+    }
+    const sort: Record<string, 1 | -1> = f.upcoming ? { appointmentDate: 1, _id: 1 } : { createdAt: -1, _id: -1 };
+    const [docs, total] = await Promise.all([AppointmentModel.find(q).sort(sort).skip((f.page - 1) * f.limit).limit(f.limit).lean().exec(), AppointmentModel.countDocuments(q).exec()]);
     return pageResult(docs.map((doc) => appointmentDto(doc)), f.page, f.limit, total);
   }
   async findById(id: string): Promise<Appointment | null> { if (!validId(id)) return null; const doc = await AppointmentModel.findById(id).lean().exec(); return doc ? appointmentDto(doc) : null; }
@@ -66,13 +78,17 @@ export class MongoAppointmentRepository implements AppointmentRepository {
   async update(id: string, patch: Partial<Appointment>): Promise<Appointment | null> {
     if (!validId(id)) return null;
     const update: Record<string, unknown> = { ...patch };
+    const unset: Record<string, string> = {};
     delete update.id; delete update.createdAt;
-    if (patch.status || patch.appointmentDate || patch.timeSlot) {
+    if (patch.status || patch.appointmentDate || patch.timeSlot || patch.serviceDuration !== undefined) {
       const old = await AppointmentModel.findById(id).lean().exec(); if (!old) return null;
       const status = patch.status ?? old.status; const date = patch.appointmentDate ?? old.appointmentDate; const slot = patch.timeSlot ?? old.timeSlot;
       update.activeSlotKey = status === 'cancelled' ? null : `${date}|${slot}`;
+      const keys = status === 'cancelled' ? [] : reservationKeys(date, slot, patch.serviceDuration ?? old.serviceDuration);
+      if (keys.length) update.activeMinuteKeys = keys;
+      else unset.activeMinuteKeys = '';
     }
-    try { const doc = await AppointmentModel.findByIdAndUpdate(id, { $set: update }, { new: true, runValidators: true }).lean().exec(); return doc ? appointmentDto(doc) : null; }
+    try { const doc = await AppointmentModel.findByIdAndUpdate(id, { $set: update, $unset: unset }, { new: true, runValidators: true }).lean().exec(); return doc ? appointmentDto(doc) : null; }
     catch (error) { if (isDuplicateKey(error)) throw new AppError(409, 'This time slot is already reserved.', 'APPOINTMENT_SLOT_CONFLICT'); throw error; }
   }
   
@@ -104,7 +120,8 @@ async transition(
             to === 'cancelled'
               ? null
               : `${current.appointmentDate}|${current.timeSlot}`
-        }
+        },
+        ...(to === 'cancelled' ? { $unset: { activeMinuteKeys: '' } } : {})
       },
       {
         new: true,
@@ -127,6 +144,10 @@ async transition(
 }
 
   async findActiveSlot(date: string, timeSlot: string): Promise<Appointment | null> { const doc = await AppointmentModel.findOne({ appointmentDate: date, timeSlot, status: { $ne: 'cancelled' } }).lean().exec(); return doc ? appointmentDto(doc) : null; }
+  async listActiveOnDate(date: string): Promise<Appointment[]> {
+    const rows = await AppointmentModel.find({ appointmentDate: date, status: { $ne: 'cancelled' } }).lean().exec();
+    return rows.map(appointmentDto);
+  }
   async hasServiceAppointments(serviceId: string): Promise<boolean> { return validId(serviceId) && AppointmentModel.exists({ serviceId }).then(Boolean); }
 }
 
@@ -147,8 +168,16 @@ export class MongoTransactionRepository implements TransactionRepository {
   async list(f: TransactionFilters): Promise<PageResult<Transaction>> {
     const q: FilterQuery<TransactionRecord> = {};
     if (f.status) q.status = f.status;
-    if (f.customerId && validId(f.customerId)) q.customerId = new mongoose.Types.ObjectId(f.customerId);
+    if (f.customerId !== undefined) {
+      if (!validId(f.customerId)) return pageResult([], f.page, f.limit, 0);
+      q.customerId = new mongoose.Types.ObjectId(f.customerId);
+    }
     if (f.appointmentId && validId(f.appointmentId)) q.appointmentId = new mongoose.Types.ObjectId(f.appointmentId);
+    if (f.q) {
+      const pattern = new RegExp(escapeRegex(f.q), 'i');
+      q.$or = [{ currency: pattern }, { status: pattern }, { stripeSessionId: pattern }];
+      if (validId(f.q)) q.$or.push({ _id: f.q }, { appointmentId: f.q });
+    }
     const [docs, total] = await Promise.all([TransactionModel.find(q).sort({ createdAt: -1 }).skip((f.page - 1) * f.limit).limit(f.limit).lean().exec(), TransactionModel.countDocuments(q).exec()]);
     return pageResult(docs.map((doc) => transactionDto(doc)), f.page, f.limit, total);
   }

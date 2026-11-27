@@ -4,7 +4,9 @@ import { z } from 'zod';
 import { env } from '../../config/env';
 import { UserModel } from '../../database/models/user.model';
 import { AppError } from '../../utils/errors';
+import { startupStep } from '../../utils/startup-error';
 import { verifyLegacyPassword } from './legacy-password';
+import { registrationPassword } from './registration-password';
 
 export const betterAuthPath = '/api/better-auth';
 const accountCollection = 'BetterAuthAccounts';
@@ -25,18 +27,25 @@ function isTrustedRedirect(value: string, origin: string): boolean {
 
 const signUpDetails = z.object({
   name: z.string().trim().min(2).max(120),
-  password: z.string().min(8).max(128).regex(/[a-z]/).regex(/[A-Z]/),
+  password: registrationPassword,
   acceptedTerms: z.literal(true),
 });
 
 export function validateBetterAuthConfig() {
   const secret = env.BETTER_AUTH_SECRET;
   const url = env.BETTER_AUTH_URL;
-  if (!secret || !url) throw new Error('BETTER_AUTH_SECRET and BETTER_AUTH_URL are required.');
+  if (!secret) throw new Error('BETTER_AUTH_SECRET is required.');
+  if (!url) throw new Error('BETTER_AUTH_URL is required.');
   const address = new URL(url);
   if (!['https:', 'http:'].includes(address.protocol) || address.href !== address.origin + '/' ||
       (env.NODE_ENV === 'production' && address.protocol !== 'https:')) {
     throw new Error('BETTER_AUTH_URL must be an HTTP(S) origin and use HTTPS in production.');
+  }
+  if (env.NODE_ENV === 'production' && new URL(env.CLIENT_URL).origin !== address.origin) {
+    throw new Error('CLIENT_URL must have the same public HTTPS origin as BETTER_AUTH_URL.');
+  }
+  if (env.NODE_ENV === 'production' && !env.allowedOrigins.includes(address.origin)) {
+    throw new Error('ALLOWED_ORIGINS must include the exact BETTER_AUTH_URL origin without a trailing slash.');
   }
   if (Boolean(env.GOOGLE_CLIENT_ID) !== Boolean(env.GOOGLE_CLIENT_SECRET)) {
     throw new Error('Set both Google OAuth credentials or leave both unset.');
@@ -45,18 +54,18 @@ export function validateBetterAuthConfig() {
 }
 
 async function createBetterAuth(config: ReturnType<typeof validateBetterAuthConfig>) {
-  const [{ betterAuth }, { mongodbAdapter }, { APIError, createAuthMiddleware }, node, { hashPassword }, http] =
+  const [{ betterAuth }, { mongodbAdapter }, { APIError, createAuthMiddleware }, node, { hashPassword }, http, { jwt }, jose] =
     await Promise.all([import('better-auth'), import('@better-auth/mongo-adapter'), import('better-auth/api'),
-      import('better-auth/node'), import('better-auth/crypto'), import('better-call/node')]);
+      import('better-auth/node'), import('better-auth/crypto'), import('better-call/node'), import('better-auth/plugins'), import('jose')]);
   const db = mongoose.connection.db;
   if (!db) throw new Error('Connect MongoDB before initializing Better Auth.');
   const accounts = db.collection(accountCollection);
-  const sessions = db.collection(sessionCollection);
+  const sessions = db.collection<{ _id: string | mongoose.Types.ObjectId; userId: string | mongoose.Types.ObjectId; expiresAt: Date }>(sessionCollection);
   // Use the existing Mongoose MongoClient and the same database as the domain repositories.
-  await Promise.all([
-    accounts.createIndex({ providerId: 1, accountId: 1 }, { unique: true, name: 'salonbook_auth_provider_account' }),
-    sessions.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0, name: 'salonbook_auth_session_expiry' }),
-  ]);
+  await startupStep('mongodb.indexes.' + accountCollection, () =>
+    accounts.createIndex({ providerId: 1, accountId: 1 }, { unique: true, name: 'salonbook_auth_provider_account' }));
+  await startupStep('mongodb.indexes.' + sessionCollection, () =>
+    sessions.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0, name: 'salonbook_auth_session_expiry' }));
 
   async function bindAccount(providerId: string, accountId: string, userId: string, password?: string) {
     const now = new Date();
@@ -94,7 +103,10 @@ async function createBetterAuth(config: ReturnType<typeof validateBetterAuthConf
       encryptOAuthTokens: true,
     },
     verification: { modelName: 'BetterAuthVerifications' },
-    session: { modelName: sessionCollection, expiresIn: 30 * 24 * 60 * 60, disableSessionRefresh: true },
+    plugins: [jwt({ disableSettingJwtHeader: true, jwt: {
+      issuer: config.origin, audience: config.origin, expirationTime: '5m', definePayload: ({ session }) => ({ sid: session.id }),
+    } })],
+    session: { modelName: sessionCollection, expiresIn: 30 * 24 * 60 * 60, updateAge: 24 * 60 * 60 },
     advanced: {
       useSecureCookies: env.NODE_ENV === 'production' || config.origin.startsWith('https:'),
       cookiePrefix: 'salonbook',
@@ -179,6 +191,23 @@ async function createBetterAuth(config: ReturnType<typeof validateBetterAuthConf
       await http.setResponse(res, await instance.handler(request));
     },
     headers: node.fromNodeHeaders,
+    async verifyAccessToken(token: string) {
+      if (token.length > 2048) return null;
+      const jwks = await instance.api.getJwks();
+      let payload;
+      try {
+        ({ payload } = await jose.jwtVerify(token, jose.createLocalJWKSet(jwks), {
+          issuer: config.origin, audience: config.origin, requiredClaims: ['exp', 'sub', 'sid'],
+        }));
+      } catch { return null; }
+      if (!payload.sub || typeof payload.sid !== 'string' || payload.sid.length > 128) return null;
+      const sid = payload.sid;
+      const session = await sessions.findOne({
+        _id: { $in: /^[a-f0-9]{24}$/i.test(sid) ? [sid, new mongoose.mongo.ObjectId(sid)] : [sid] },
+        expiresAt: { $gt: new Date() },
+      });
+      return session && String(session.userId) === payload.sub ? payload.sub : null;
+    },
     async findGoogleOwner(subject: string) {
       const account = await accounts.findOne<{ userId: mongoose.Types.ObjectId }>({ providerId: 'google', accountId: subject });
       return account ? UserModel.findById(account.userId) : null;

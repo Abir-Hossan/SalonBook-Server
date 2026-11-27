@@ -91,4 +91,18 @@ describe.skipIf(!uri && !localUri)('Phase 03 MongoDB appointment persistence (' 
     await expect(repositories.appointments.create({ ...record, customerId: secondCustomer.id }))
       .rejects.toMatchObject({ statusCode: 409, code: 'APPOINTMENT_SLOT_CONFLICT' });
   });
+
+  it('prevents concurrent overlapping reservations with different start times', async () => {
+    const otherDate = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+    const base = { ...slot('09:30 AM'), appointmentDate: otherDate, serviceDuration: 120,
+      customerId: customer.id, servicePrice: 165, status: 'pending' as const, paymentStatus: 'unpaid' as const };
+    const results = await Promise.allSettled([
+      repositories.appointments.create(base),
+      repositories.appointments.create({ ...base, customerId: secondCustomer.id, timeSlot: '10:30 AM' }),
+    ]);
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(results).toContainEqual(expect.objectContaining({
+      status: 'rejected', reason: expect.objectContaining({ code: 'APPOINTMENT_SLOT_CONFLICT' }),
+    }));
+  });
 });

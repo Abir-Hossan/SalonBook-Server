@@ -1,4 +1,4 @@
-import { generateKeyPairSync, randomBytes, scryptSync, sign } from 'node:crypto';
+import { createHmac, generateKeyPairSync, randomBytes, scryptSync, sign } from 'node:crypto';
 import mongoose from 'mongoose';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -16,13 +16,16 @@ import { createQaDatabase, qaTarget } from '../fixtures/qa-database';
 vi.hoisted(() => {
   process.env.GOOGLE_CLIENT_ID = 'salonbook-oauth-test-client';
   process.env.GOOGLE_CLIENT_SECRET = 'salonbook-oauth-test-secret';
+  process.env.STRIPE_SECRET_KEY = 'sk_test_mock';
+  process.env.STRIPE_WEBHOOK_SECRET = 'whsec_mock';
+  process.env.IMGBB_API_KEY = 'imgbb_mock';
 });
 
 const localUri = process.env.SALONBOOK_AUTH_TEST_URI;
 const atlasUri = process.env.SALONBOOK_AUTH_ATLAS_TEST_URI;
 const qa = createQaDatabase('salonbook_auth_qa');
 const origin = env.allowedOrigins[0] ?? env.CLIENT_URL;
-const password = 'DemoPassword12';
+const password = 'DemoPassword12!';
 const patron = (key: string) => ({ name: 'Test Patron', email: key + '@example.test', password, acceptedTerms: true });
 const salt = '0123456789abcdef0123456789abcdef';
 const legacyHash = salt + ':' + scryptSync(password, salt, 64).toString('hex');
@@ -64,6 +67,16 @@ describe.skipIf(!localUri && !atlasUri)('Better Auth with disposable MongoDB (' 
     await agent.post('/api/auth/register').set('Origin', origin).send({ ...patron('forged'), role: 'admin' }).expect(400);
   });
 
+  it('requires a digit and a symbol on both registration routes', async () => {
+    const agent = request.agent(app());
+    for (const path of ['/api/auth/register', '/api/better-auth/sign-up/email']) {
+      for (const weakPassword of ['MissingNumber!', 'MissingSymbol12']) {
+        await agent.post(path).set('Origin', origin).send({ ...patron('weak'), password: weakPassword }).expect(400);
+      }
+    }
+    expect(await UserModel.exists({ email: patron('weak').email })).toBeNull();
+  });
+
   it('logs in, rejects bad credentials and revokes the cookie on logout', async () => {
     const agent = request.agent(app());
     await signUp(agent, 'logout').expect(201);
@@ -98,6 +111,189 @@ describe.skipIf(!localUri && !atlasUri)('Better Auth with disposable MongoDB (' 
       { userId: new mongoose.Types.ObjectId(created.body.data.id) }, { $set: { expiresAt: new Date(0) } },
     );
     await agent.get('/api/auth/me').expect(401);
+  });
+
+  it('issues a signed access token bound to its session', async () => {
+    const agent = request.agent(app());
+    const user = await signUp(agent, 'jwt').expect(201);
+    const issued = await agent.get('/api/better-auth/token').expect(200);
+    const token = issued.body.token;
+    expect(typeof token).toBe('string');
+    const bearer = () => request(app()).get('/api/auth/me').set('Authorization', 'Bearer ' + token);
+    expect((await bearer().expect(200)).body.data.id).toBe(user.body.data.id);
+    await request(app()).get('/api/auth/me').set('Authorization', 'Bearer broken.jwt.value').expect(401);
+    await agent.post('/api/auth/sign-out').set('Origin', origin).expect(204);
+    await bearer().expect(401);
+  });
+
+  it('renews remembered sessions and preserves the short-session expiry', async () => {
+    const agent = request.agent(app());
+    const created = await signUp(agent, 'remember').expect(201);
+    const sessions = mongoose.connection.db!.collection('BetterAuthSessions');
+    const owner = { userId: new mongoose.Types.ObjectId(created.body.data.id) };
+    const short = await sessions.findOne(owner);
+    await agent.get('/api/better-auth/get-session').expect(200);
+    expect((await sessions.findOne(owner))?.expiresAt).toEqual(short?.expiresAt);
+    await agent.post('/api/auth/sign-in').set('Origin', origin).send({ email: patron('remember').email, password, remember: true }).expect(200);
+    const day = 86400000;
+    const remembered = await sessions.findOne({ ...owner, expiresAt: { $gt: new Date(Date.now() + 2 * day) } });
+    expect(remembered).not.toBeNull();
+    await sessions.updateOne({ _id: remembered!._id }, {
+      $set: { expiresAt: new Date(Date.now() + 8 * day), createdAt: new Date(Date.now() - 22 * day) },
+    });
+    await agent.get('/api/better-auth/get-session').expect(200);
+    expect((await sessions.findOne({ _id: remembered!._id }))!.expiresAt!.getTime()).toBeGreaterThan(Date.now() + 20 * day);
+  });
+
+  it('authorizes, validates and saves an uploaded service image using a controlled provider response', async () => {
+    const admin = request.agent(app());
+    await signIn(admin, 'admin').expect(200);
+    const customer = request.agent(app());
+    await signUp(customer, 'image-customer').expect(201);
+    const png = Buffer.from('89504e470d0a1a0a', 'hex');
+    const upload = (agent: typeof admin, body: Buffer) => agent.post('/api/admin/images/service').set('Origin', origin).set('Content-Type', 'image/png').send(body);
+    await upload(customer, png).expect(403);
+    await upload(admin, Buffer.from('invalid')).expect(415);
+    const img = 'https://i.ibb.co/example/salon.png';
+    vi.stubGlobal('fetch', vi.fn(async (target: URL) => {
+      expect(target.host).toBe('api.imgbb.com');
+      return Response.json({ success: true, data: { url: img } });
+    }));
+    try {
+      const response = await upload(admin, png).expect(201);
+      expect(response.body.data.image).toBe(img);
+      const saved = await admin.post('/api/services').set('Origin', origin).send({
+        serviceName: 'Service image acceptance', category: 'Beauty', description: 'Service with a verified image upload.',
+        price: 30, duration: 60, image: img,
+      }).expect(201);
+      expect((await ServiceModel.findById(saved.body.data.id))?.image).toBe(img);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('validates Stripe test webhooks and records a paid appointment only once', async () => {
+    const agent = request.agent(app());
+    const user = await signUp(agent, 'stripe').expect(201);
+    const attempt = '610d182e-aeee-4f23-a3ef-6202b3dc79ca';
+    const booking = await AppointmentModel.create({
+      serviceId: ids.service, customerId: user.body.data.id, appointmentDate: '2099-08-08',
+      timeSlot: '04:00 PM', servicePrice: 165, status: 'confirmed', paymentStatus: 'unpaid', checkoutAttempt: attempt,
+    });
+    const body = JSON.stringify({ type: 'checkout.session.completed', data: { object: {
+      id: 'cs_test_salonbook', status: 'complete', payment_status: 'paid', amount_total: 16500,
+      currency: 'usd', livemode: false, metadata: { appointmentId: String(booking._id), attempt },
+    } } });
+    const timestamp = Math.floor(Date.now() / 1000);
+    const signed = createHmac('sha256', env.STRIPE_WEBHOOK_SECRET!).update(timestamp + '.' + body).digest('hex');
+    const webhook = (signature: string) => request(app()).post('/api/payments/webhook')
+      .set('Content-Type', 'application/json').set('Stripe-Signature', signature).send(body);
+    await webhook('bad').expect(400);
+    expect((await AppointmentModel.findById(booking._id))?.paymentStatus).toBe('unpaid');
+    await webhook(`t=${timestamp},v1=${signed}`).expect(204);
+    await webhook(`t=${timestamp},v1=${signed}`).expect(204);
+    expect((await AppointmentModel.findById(booking._id))?.paymentStatus).toBe('paid');
+    expect(await TransactionModel.countDocuments({ appointmentId: booking._id })).toBe(1);
+  });
+
+  it('starts only eligible owned Stripe test checkouts and reuses only a matching provider session', async () => {
+    const owner = request.agent(app());
+    const user = await signUp(owner, 'checkout-owner').expect(201);
+    const other = request.agent(app());
+    await signUp(other, 'checkout-other').expect(201);
+    const booking = await AppointmentModel.create({
+      serviceId: ids.service, customerId: user.body.data.id, appointmentDate: '2099-09-10',
+      timeSlot: '01:00 PM', servicePrice: 165, status: 'pending', paymentStatus: 'unpaid',
+    });
+    const appointmentId = String(booking._id);
+    const checkout = (agent: typeof owner, id = appointmentId) =>
+      agent.post('/api/payments/checkout').set('Origin', origin).send({ appointmentId: id });
+    const sessionId = 'cs_test_release_verification';
+    const checkoutUrl = 'https://checkout.stripe.com/c/pay/' + sessionId;
+    let attempt = '';
+    let amount = 1;
+    const provider = vi.fn(async (target: string, options?: RequestInit) => {
+      if (options?.method === 'POST') {
+        expect(target).toBe('https://api.stripe.com/v1/checkout/sessions');
+        const params = options.body as URLSearchParams;
+        const submitted = params.get('metadata[attempt]')!;
+        expect(new Headers(options.headers).get('Idempotency-Key')).toBe(submitted);
+        expect(params.get('line_items[0][price_data][unit_amount]')).toBe('16500');
+        expect(params.get('metadata[appointmentId]')).toBe(appointmentId);
+        expect(params.get('success_url')).toBe(new URL('/payment/success?appointment=' + appointmentId, env.CLIENT_URL).href);
+        expect(params.get('cancel_url')).toBe(new URL('/payment/cancel', env.CLIENT_URL).href);
+        if (attempt) expect(submitted).toBe(attempt);
+        attempt = submitted;
+      } else {
+        expect(target).toBe('https://api.stripe.com/v1/checkout/sessions/' + sessionId);
+      }
+      return Response.json({
+        id: sessionId, url: checkoutUrl, status: 'open', payment_status: 'unpaid', amount_total: amount,
+        currency: 'usd', livemode: false, metadata: { appointmentId, attempt },
+      });
+    });
+    vi.stubGlobal('fetch', provider);
+    try {
+      await checkout(owner).expect(422);
+      await checkout(owner, 'invalid-appointment').expect(400);
+      await checkout(owner, String(new mongoose.Types.ObjectId())).expect(422);
+      await AppointmentModel.updateOne({ _id: booking._id }, { $set: { status: 'cancelled' } });
+      await checkout(owner).expect(422);
+      await AppointmentModel.updateOne({ _id: booking._id }, { $set: { status: 'confirmed', paymentStatus: 'paid' } });
+      await checkout(owner).expect(422);
+      await AppointmentModel.updateOne({ _id: booking._id }, { $set: { paymentStatus: 'unpaid' } });
+      await checkout(other).expect(422);
+      expect(provider).toHaveBeenCalledTimes(0);
+
+      const mismatch = await checkout(owner).expect(502);
+      expect(mismatch.body.errors[0].code).toBe('CHECKOUT_SESSION_MISMATCH');
+      expect((await AppointmentModel.findById(booking._id))?.checkoutSessionId).toBeUndefined();
+      amount = 16500;
+      expect((await checkout(owner).expect(200)).body.data.url).toBe(checkoutUrl);
+      expect((await checkout(owner).expect(200)).body.data.url).toBe(checkoutUrl);
+      const stored = await AppointmentModel.findById(booking._id);
+      expect(stored?.checkoutSessionId).toBe(sessionId);
+      expect(stored?.paymentStatus).toBe('unpaid');
+      expect(provider).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('lets an admin release a recorded test checkout after Stripe confirms expiry', async () => {
+    const admin = request.agent(app());
+    await signIn(admin, 'admin').expect(200);
+    const customer = request.agent(app());
+    const user = await signUp(customer, 'checkout-release').expect(201);
+    const attempt = '540be2c0-9832-426a-86d7-619cdde7a03d';
+    const sessionId = 'cs_test_checkout_release';
+    const booking = await AppointmentModel.create({
+      serviceId: ids.service, customerId: user.body.data.id, appointmentDate: '2099-08-09',
+      timeSlot: '01:00 PM', servicePrice: 165, status: 'confirmed', paymentStatus: 'unpaid',
+      checkoutAttempt: attempt, checkoutSessionId: sessionId,
+    });
+    const data = { appointmentId: String(booking._id) };
+    const release = (agent: typeof admin) => agent.post('/api/payments/release-checkout').set('Origin', origin).send(data);
+    await release(customer).expect(403);
+    await admin.patch('/api/admin/appointments/' + data.appointmentId + '/cancel').set('Origin', origin).expect(409);
+    vi.stubGlobal('fetch', vi.fn(async (target: string, options?: RequestInit) => {
+      const expiry = target.endsWith('/expire');
+      expect(target).toBe('https://api.stripe.com/v1/checkout/sessions/' + sessionId + (expiry ? '/expire' : ''));
+      expect(options?.method).toBe(expiry ? 'POST' : undefined);
+      return Response.json({
+        id: sessionId, status: expiry ? 'expired' : 'open', payment_status: 'unpaid',
+        amount_total: 16500, currency: 'usd', livemode: false, metadata: { ...data, attempt },
+      });
+    }));
+    try {
+      await release(admin).expect(200);
+      const updated = await AppointmentModel.findById(booking._id);
+      expect(updated?.checkoutAttempt).toBeUndefined();
+      expect(updated?.paymentStatus).toBe('unpaid');
+      await admin.patch('/api/admin/appointments/' + data.appointmentId + '/cancel').set('Origin', origin).expect(200);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('rejects a blocked account at login and after an administrator blocks its live session', async () => {
@@ -201,5 +397,15 @@ describe.skipIf(!localUri && !atlasUri)('Better Auth with disposable MongoDB (' 
     expect(String((await AppointmentModel.findById(id).lean())?.customerId)).toBe(created.body.data.id);
     await agent.patch('/api/appointments/' + id + '/cancel').set('Origin', origin).expect(200);
     expect((await AppointmentModel.findById(id).lean())?.status).toBe('cancelled');
+  });
+
+  it('sets Secure and HttpOnly cookies when Better Auth uses an HTTPS origin', async () => {
+    await initializeBetterAuth({ origin: 'https://client.example.test', secret: randomBytes(48).toString('hex') });
+    const response = await signUp(request.agent(app()), 'https-cookie').expect(201);
+    const cookies = response.headers['set-cookie'] as unknown as string[];
+    const sessionCookie = cookies.find((value) => value.startsWith('__Secure-salonbook.session_token='));
+    expect(Boolean(sessionCookie && /;\s*Secure(?:;|$)/i.test(sessionCookie))).toBe(true);
+    expect(Boolean(sessionCookie && /;\s*HttpOnly(?:;|$)/i.test(sessionCookie))).toBe(true);
+    expect(Boolean(sessionCookie && /;\s*SameSite=Lax(?:;|$)/i.test(sessionCookie))).toBe(true);
   });
 });

@@ -1,7 +1,19 @@
 import {describe,it,expect,beforeEach} from 'vitest';import {MemoryAppointmentRepository,MemoryServiceRepository} from '../../src/repositories/memory';import {AppointmentService} from '../../src/modules/appointments/appointment.service';import {appointmentSeed,customer,admin,serviceSeed,ids} from '../fixtures/data';
 let repo:MemoryAppointmentRepository;let service:AppointmentService;beforeEach(()=>{repo=new MemoryAppointmentRepository(appointmentSeed);service=new AppointmentService(repo,new MemoryServiceRepository(serviceSeed));});
-const booking={serviceId:ids.service,appointmentDate:'2099-02-01',timeSlot:'11:00 AM'};
+const booking={serviceId:ids.service,appointmentDate:'2099-02-01',timeSlot:'11:30 AM'};
 describe('AppointmentService',()=>{
+it('validates available times and rejects overlap while allowing adjacent services', async () => {
+  const longService = { ...serviceSeed[0]!, duration: 120 };
+  const scheduler = new AppointmentService(repo, new MemoryServiceRepository([longService]));
+  const date = booking.appointmentDate;
+  await expect(scheduler.create(customer, { ...booking, timeSlot: '02:15 AM' })).rejects.toMatchObject({ code: 'INVALID_TIME_SLOT' });
+  const reservation = await scheduler.create(customer, { ...booking, timeSlot: '09:30 AM' });
+  expect((await scheduler.availability(longService.id, date)).times).not.toContain('10:30 AM');
+  await expect(scheduler.create(customer, { ...booking, timeSlot: '10:30 AM' })).rejects.toMatchObject({ statusCode: 409 });
+  await expect(scheduler.create(customer, { ...booking, timeSlot: '11:30 AM' })).resolves.toMatchObject({ serviceDuration: 120 });
+  await scheduler.cancelByCustomer(customer, reservation.id);
+  expect((await scheduler.availability(longService.id, date)).times).toContain('09:30 AM');
+});
 it('accepts only one concurrent booking for the same slot', async () => {
   const results = await Promise.allSettled([
     service.create(customer, { ...booking, timeSlot: '9:30 AM' }),
